@@ -29,7 +29,7 @@ export const authUsersService = {
     formData.append("codigo", usuario);
     formData.append("foto", foto, "foto.jpg");
     return fetcher<BodyListResponse<any>>(
-      API_URL+"/api/validate_face",
+      API_URL+"/validate_face",
       {
         method: "POST",
         body: formData,

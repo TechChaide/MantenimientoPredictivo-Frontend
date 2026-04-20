@@ -7,30 +7,31 @@ networks:
 services:
   frontend:
     build: .
-    image: cachaide/certificados-calidad-frontend:1.0
-    container_name: certificados-calidad_frontend_prod
+    image: techchaide/mantenimiento-predictivo-frontend:1.0
+    container_name: mantenimiento_predictivo_frontend_prod
     restart: unless-stopped
     environment:
-      - NEXT_PUBLIC_BASE_PATH=/Certificados-Calidad
+      - NEXT_PUBLIC_BASE_PATH=/Mantenimiento-Predictivo
       - HOSTNAME=0.0.0.0
-    volumes:
-      - "/fotomenu:/app/fotomenu"
     networks:
       - b2b_network
       - traefik-net
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-net"
-      - "traefik.http.routers.certificados-calidad-frontend-prod.rule=Host(`apps.chaide.com`) && (PathPrefix(`/Certificados-Calidad`) || PathPrefix(`/_next`) || PathPrefix(`/favicon.ico`))"
-      - "traefik.http.routers.certificados-calidad-frontend-prod.entrypoints=websecure"
-      - "traefik.http.routers.certificados-calidad-frontend-prod.priority=100"
+      - "traefik.http.routers.mantenimiento-predictivo-frontend-prod.rule=Host(`apps.chaide.com`) && (PathPrefix(`/Mantenimiento-Predictivo`) || PathPrefix(`/_next`) || PathPrefix(`/favicon.ico`))"
+      - "traefik.http.routers.mantenimiento-predictivo-frontend-prod.entrypoints=websecure"
+      - "traefik.http.routers.mantenimiento-predictivo-frontend-prod.priority=100"
       # Note: No stripPrefix middleware for frontend so the app receives the /b2b prefix.
-      - "traefik.http.routers.certificados-calidad-frontend-prod.tls=true"
-      - "traefik.http.services.certificados-calidad-frontend-prod.loadbalancer.server.port=3000"
+      - "traefik.http.routers.mantenimiento-predictivo-frontend-prod.tls=true"
+      - "traefik.http.services.mantenimiento-predictivo-frontend-prod.loadbalancer.server.port=3000"
 
-      # --- LÍNEAS AÑADIDAS ---
-      # 1. Define el middleware de la lista blanca de IPs
-      - "traefik.http.middlewares.lista-ips-calidad.ipwhitelist.sourceRange=127.0.0.1/32, 201.234.212.234/32"
+      # --- MIDDLEWARES ---
+      # 1. Stripprefix para eliminar /Mantenimiento-Predictivo antes de llegar a Next.js
+      - "traefik.http.middlewares.strip-mantenimiento.stripprefix.prefixes=/Mantenimiento-Predictivo"
 
-      # 2. Aplica el middleware al router del frontend
-      - "traefik.http.routers.certificados-calidad-frontend-prod.middlewares=lista-ips-calidad"
+      # 2. Define el middleware de la lista blanca de IPs
+      - "traefik.http.middlewares.lista-ips-mantenimiento-predictivo.ipwhitelist.sourceRange=127.0.0.1/32, 201.234.212.234/32"
+
+      # 3. Aplica ambos middlewares al router del frontend
+      - "traefik.http.routers.mantenimiento-predictivo-frontend-prod.middlewares=strip-mantenimiento, lista-ips-mantenimiento-predictivo"

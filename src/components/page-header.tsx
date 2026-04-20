@@ -18,14 +18,14 @@ export function PageHeader({
   return (
     <header className="mb-8">
       <div className="flex items-center gap-4">
-        {showBack && (
+        {/* {showBack && (
           <Button variant="outline" size="icon" asChild>
             <Link href={backHref}>
               <ArrowLeft className="w-5 h-5" />
               <span className="sr-only">Volver</span>
             </Link>
           </Button>
-        )}
+        )} */}
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">
             {title}

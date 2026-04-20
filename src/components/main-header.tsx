@@ -1,10 +1,14 @@
 'use client';
 import { Input } from '@/components/ui/input';
 import { Search } from 'lucide-react';
+import { SidebarTrigger } from '@/components/ui/sidebar';
 
 export function MainHeader() {
   return (
     <header className="flex h-14 lg:h-[60px] items-center gap-4 border-b bg-background px-6">
+      <div className="flex items-center md:hidden">
+        <SidebarTrigger className="md:hidden mr-2" />
+      </div>
       <div className="w-full flex-1">
         <form>
           <div className="relative">

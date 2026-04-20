@@ -3,7 +3,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { VariantProps, cva } from "class-variance-authority"
-import { PanelLeft } from "lucide-react"
+import { PanelLeft, X } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
@@ -206,7 +206,15 @@ const Sidebar = React.forwardRef<
             }
             side={side}
           >
-            <div className="flex h-full w-full flex-col">{children}</div>
+            <div className="flex h-full w-full flex-col">
+              <div className="flex items-center justify-end p-2 border-b">
+                <Button variant="ghost" size="icon" onClick={() => setOpenMobile(false)} className="mr-2">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar menú</span>
+                </Button>
+              </div>
+              {children}
+            </div>
           </SheetContent>
         </Sheet>
       )

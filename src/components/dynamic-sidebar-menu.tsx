@@ -121,7 +121,9 @@ const RecursiveMenu = ({
           ) : (
             <SidebarMenuItem>
               <SidebarMenuButton
-                href={environment.basePath + (item.path || "#")}
+                // href={environment.basePath + (item.path || "#")}
+                href={(item.path || "#")}
+
                 active={item.path && pathname?.startsWith(item.path)}
                 className={
                   isCollapsed

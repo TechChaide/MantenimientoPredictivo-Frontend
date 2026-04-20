@@ -9,7 +9,7 @@ export const environment = {
     apiURL : 'https://apps.chaide.com/machineMaintenance',
     //apiURL: 'http://localhost:5400',
 
-    apiUsuariosURL: 'https://apps.chaide.com/AServiceUth',
+    apiUsuariosURL: 'https://apps.chaide.com/AServiceUth2',
     /////////////////////////////////////////Api Seguridades
     //apiMenuURL : 'http://localhost:5401', 
     apiMenuURL : 'https://apps.chaide.com/seguridades',

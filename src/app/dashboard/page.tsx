@@ -1,7 +1,8 @@
 
 'use client';
+export const dynamic = "force-dynamic";
 
-
+import { Suspense } from 'react';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 import { SidebarProvider, Sidebar, SidebarInset, SidebarHeader, SidebarContent, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
@@ -76,7 +77,7 @@ function NoDataState() {
 // Mapa para corregir nombres de componentes
 const componentNameMapping: Record<string, Record<string, string>> = {};
 
-export default function DashboardPage() {
+function DashboardContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -89,6 +90,7 @@ export default function DashboardPage() {
   const [noDataAvailable, setNoDataAvailable] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [predictionDays, setPredictionDays] = useState<number>(15);
   
   // Set default date range on first load
   useEffect(() => {
@@ -365,7 +367,7 @@ export default function DashboardPage() {
           {/* Select de componente, solo si hay máquina seleccionada y componentes */}
           {machineId && componentList.length > 0 && (
             <div className="min-w-[200px] mr-4">
-              <Select
+                <Select
                 value={componentId || ""}
                 onValueChange={value => {
                   const newParams = new URLSearchParams(searchParams.toString());
@@ -385,6 +387,21 @@ export default function DashboardPage() {
               </Select>
             </div>
           )}
+          <div className="min-w-[140px] mr-4">
+            <Select
+              value={String(predictionDays)}
+              onValueChange={value => setPredictionDays(Number(value))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Días predicción" />
+              </SelectTrigger>
+              <SelectContent>
+                {[5,10,15,30,45,60].map(d => (
+                  <SelectItem key={d} value={String(d)}>{d} días</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <DateRangePicker initialDate={displayRange} />
         </DashboardHeader>
         <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
@@ -411,6 +428,7 @@ export default function DashboardPage() {
                   data={chartData}
                   aggregationLevel={aggregationLevel}
                   machine={machineId}
+                  predictionDays={predictionDays}
                 />
               </div>
             </div>
@@ -418,6 +436,23 @@ export default function DashboardPage() {
         </main>
       </SidebarInset>
     </SidebarProvider>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={
+      <SidebarProvider>
+        <SidebarInset className="bg-slate-50">
+          <DashboardHeader title="Cargando..." />
+          <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
+            <LoadingState progress={0} />
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    }>
+      <DashboardContent />
+    </Suspense>
   );
 }
 

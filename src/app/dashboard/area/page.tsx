@@ -57,9 +57,9 @@ export default function AreaPage() {
     if (!filter) return items;
     const f = filter.toLowerCase();
     return items.filter(it =>
-      String(it.codigo_area).toLowerCase().includes(f) ||
-      it.nombre_area.toLowerCase().includes(f) ||
-      it.estado.toLowerCase().includes(f)
+      String(it.codigo_area ?? '').toLowerCase().includes(f) ||
+      String(it.nombre_area ?? '').toLowerCase().includes(f) ||
+      String(it.estado ?? '').toLowerCase().includes(f)
     );
   }, [items, filter]);
 

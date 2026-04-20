@@ -24,6 +24,17 @@ export const limitesService = {
     return response.json();
   },
 
+  async getByComponentId(params: { codigo_componente: string }): Promise<BodyListResponse<Limites>> {
+    const queryParams = new URLSearchParams();
+    queryParams.append('codigo_componente', params.codigo_componente);
+    const response = await fetch(`${API_URL}?${queryParams.toString()}`);
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido' }));
+      throw new Error(errorBody.message || `Failed to fetch limites for component ${params.codigo_componente}`);
+    }
+    return response.json();
+  },
+
   async save(data: Limites): Promise<BodyResponse<Limites>> {
     const response = await fetch(API_URL, {
       method: 'POST',

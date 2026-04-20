@@ -26,11 +26,11 @@ const formatInTimeZone = (date: Date, formatString: string, timeZone: string) =>
 export function DateRangePicker({ className, initialDate }: DateRangePickerProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [date, setDate] = React.useState<DateRange | undefined>(initialDate);
   const [isClient, setIsClient] = React.useState(false);
   const [timeZone, setTimeZone] = React.useState('UTC');
   const [popoverOpen, setPopoverOpen] = React.useState(false);
+  const updateTimeoutRef = React.useRef<NodeJS.Timeout>();
 
   const sinceStartDate = new Date('2025-04-10T00:00:00Z');
 
@@ -41,34 +41,38 @@ export function DateRangePicker({ className, initialDate }: DateRangePickerProps
   React.useEffect(() => {
     setIsClient(true);
     setTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    
+    // Cleanup del timeout al desmontar
+    return () => {
+      if (updateTimeoutRef.current) clearTimeout(updateTimeoutRef.current);
+    };
   }, []);
 
-  const updateURL = (range: DateRange | undefined) => {
-    const newParams = new URLSearchParams(searchParams.toString());
+  const updateURL = React.useCallback((range: DateRange | undefined) => {
+    // Debounce: espera 300ms antes de actualizar URL
+    if (updateTimeoutRef.current) clearTimeout(updateTimeoutRef.current);
     
-    if (range?.from) {
-      newParams.set("from", format(range.from, "yyyy-MM-dd"));
+    updateTimeoutRef.current = setTimeout(() => {
+      const newParams = new URLSearchParams();
       
-      const toDate = range.to || range.from;
-      const today = new Date();
+      if (range?.from) {
+        newParams.set("from", format(range.from, "yyyy-MM-dd"));
+        
+        const toDate = range.to || range.from;
+        const today = new Date();
 
-      // Lógica para enviar ISOString si es el día actual (para tener la hora exacta)
-      if (toDate && isSameDay(toDate, today)) {
-          newParams.set("to", today.toISOString()); 
-      } else if (toDate) {
-          newParams.set("to", format(toDate, "yyyy-MM-dd"));
-      } else {
-        newParams.delete("to");
+        if (toDate && isSameDay(toDate, today)) {
+            newParams.set("to", today.toISOString()); 
+        } else if (toDate) {
+            newParams.set("to", format(toDate, "yyyy-MM-dd"));
+        }
       }
+      
+      router.push(`${pathname}?${newParams.toString()}`);
+    }, 300);
+  }, [pathname, router]);
 
-    } else {
-        newParams.delete("from");
-        newParams.delete("to");
-    }
-    router.push(`${pathname}?${newParams.toString()}`);
-  }
-
-  const handleSelect = (range: DateRange | undefined) => {
+  const handleSelect = React.useCallback((range: DateRange | undefined) => {
     // Si selecciona "hoy", actualizamos la hora al momento actual
     if (range?.to && isSameDay(range.to, new Date())) {
         range.to = new Date();
@@ -81,9 +85,9 @@ export function DateRangePicker({ className, initialDate }: DateRangePickerProps
         updateURL(range);
         setPopoverOpen(false); 
     }
-  };
+  }, [updateURL]);
 
-  const handlePreset = (preset: 'last30days' | 'last3Months' | 'lastYear' | 'sinceStart') => {
+  const handlePreset = React.useCallback((preset: 'last30days' | 'last3Months' | 'lastYear' | 'sinceStart') => {
     const today = new Date(); 
     let from: Date;
     let to: Date = today;
@@ -106,7 +110,7 @@ export function DateRangePicker({ className, initialDate }: DateRangePickerProps
     setDate(newRange);
     updateURL(newRange);
     setPopoverOpen(false);
-  }
+  }, [updateURL, sinceStartDate]);
 
   // ---------------------------------------------------------------------------
   // ⚠️ CRITICAL AI INSTRUCTION / INSTRUCCIÓN CRÍTICA PARA IA ⚠️
@@ -122,7 +126,7 @@ export function DateRangePicker({ className, initialDate }: DateRangePickerProps
   //
   // DO NOT REFACTOR (NO REFACTORIZAR) para unir estos pasos.
   // ---------------------------------------------------------------------------
-  const handleClear = (e?: React.MouseEvent) => {
+  const handleClear = React.useCallback((e?: React.MouseEvent) => {
     e?.preventDefault();
     e?.stopPropagation();
     
@@ -131,10 +135,18 @@ export function DateRangePicker({ className, initialDate }: DateRangePickerProps
     
     // 2. IMPORTANTE: NO llamamos a updateURL(undefined) aquí.
     // Esto permite al usuario seleccionar el nuevo rango sin que la página se recargue.
-  }
+  }, []);
 
   const selectedDays = date?.from && date?.to ? differenceInDays(date.to, date.from) + 1 : 0;
   const hasSelection = date?.from;
+
+  // Memoizar las fechas formateadas para evitar recálculos innecesarios
+  const formattedDateRange = React.useMemo(() => {
+    if (!isClient || !date?.from) return null;
+    const from = formatInTimeZone(date.from, "dd MMM yyyy", timeZone);
+    const to = date.to ? formatInTimeZone(date.to, "dd MMM yyyy", timeZone) : null;
+    return { from, to };
+  }, [date?.from, date?.to, timeZone, isClient]);
 
   return (
     <div className={cn("grid gap-2", className)}>
@@ -150,13 +162,13 @@ export function DateRangePicker({ className, initialDate }: DateRangePickerProps
           >
             <CalendarIcon className="mr-2 h-4 w-4 text-slate-500" />
             <span className="flex-1">
-              {isClient && date?.from ? (
-                date.to && differenceInDays(date.to, date.from) > 0 ? (
+              {formattedDateRange ? (
+                date!.to && differenceInDays(date!.to, date!.from) > 0 ? (
                   <>
-                    {formatInTimeZone(date.from, "dd MMM yyyy", timeZone)} - {formatInTimeZone(date.to, "dd MMM yyyy", timeZone)}
+                    {formattedDateRange.from} - {formattedDateRange.to}
                   </>
                 ) : (
-                  formatInTimeZone(date.from, "dd MMM yyyy", timeZone)
+                  formattedDateRange.from
                 )
               ) : (
                 <span>Seleccionar rango de fechas</span>

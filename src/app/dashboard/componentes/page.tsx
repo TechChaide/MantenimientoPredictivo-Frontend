@@ -79,10 +79,10 @@ export default function ComponentePage() {
     if (!filter) return items;
     const f = filter.toLowerCase();
     return items.filter(it =>
-      String(it.codigo_componente).toLowerCase().includes(f) ||
-      it.codigo_equipo.toLowerCase().includes(f) ||
-      it.nombre_componente.toLowerCase().includes(f) ||
-      it.estado.toLowerCase().includes(f)
+      String(it.codigo_componente ?? '').toLowerCase().includes(f) ||
+      String(it.codigo_equipo ?? '').toLowerCase().includes(f) ||
+      String(it.nombre_componente ?? '').toLowerCase().includes(f) ||
+      String(it.estado ?? '').toLowerCase().includes(f)
     );
   }, [items, filter]);
 

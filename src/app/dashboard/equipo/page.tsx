@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { AlertTriangle, Loader2, Plus, Save, RefreshCw, Trash2, X, Flag, EllipsisVertical } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 
 type FormState = {
   mode: "new" | "edit";
@@ -23,6 +24,7 @@ const emptyEquipo: Equipo = {
   codigo_equipo: 0 as any, // 0 para inserción
   codigo_area: "",
   nombre_equipo: "",
+  admite_registros_manuales: false,
   estado: "A",
 };
 
@@ -73,10 +75,10 @@ export default function EquipoPage() {
     if (!filter) return items;
     const f = filter.toLowerCase();
     return items.filter(it =>
-      String(it.codigo_equipo).toLowerCase().includes(f) ||
-      it.codigo_area.toLowerCase().includes(f) ||
-      it.nombre_equipo.toLowerCase().includes(f) ||
-      it.estado.toLowerCase().includes(f)
+      String(it.codigo_equipo ?? '').toLowerCase().includes(f) ||
+      String(it.codigo_area ?? '').toLowerCase().includes(f) ||
+      String(it.nombre_equipo ?? '').toLowerCase().includes(f) ||
+      String(it.estado ?? '').toLowerCase().includes(f)
     );
   }, [items, filter]);
 
@@ -96,7 +98,7 @@ export default function EquipoPage() {
   const startEdit = (c: Equipo) => setForm({ mode: "edit", data: { ...c } });
   const cancelEdit = () => startNew();
 
-  const onChangeField = (field: keyof Equipo, value: string) => {
+  const onChangeField = (field: keyof Equipo, value: string | boolean) => {
     setForm(prev => ({ ...prev, data: { ...prev.data, [field]: value } }));
   };
 
@@ -111,6 +113,7 @@ export default function EquipoPage() {
         codigo_equipo: form.mode === "edit" ? String(form.data.codigo_equipo ?? 0) : 0,
         codigo_area: form.data.codigo_area || "",
         nombre_equipo: (form.data.nombre_equipo || "").trim(),
+        admite_registros_manuales: form.data.admite_registros_manuales ?? false,
         estado: (form.data.estado || "A").trim(),
       };
       const respSaved = await equipoService.save(payload);
@@ -207,6 +210,14 @@ export default function EquipoPage() {
                     <option value="I">Inactivo</option>
                   </select>
                 </div>
+                <div className="mb-4 flex items-center justify-between">
+                  <Label htmlFor="admite_registros_manuales">Admite Registros Manuales</Label>
+                  <Switch
+                    id="admite_registros_manuales"
+                    checked={form.data.admite_registros_manuales ?? false}
+                    onCheckedChange={(checked) => onChangeField('admite_registros_manuales', checked)}
+                  />
+                </div>
                 <div className="flex gap-2 pt-2">
                   <Button type="submit" className={form.mode === 'edit' ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'} disabled={!canSave() || saving}>
                     {form.mode === 'edit' ? 'Actualizar' : 'Guardar'}
@@ -228,15 +239,16 @@ export default function EquipoPage() {
                     <th className="text-left px-3 py-2">Área</th>
                     <th className="text-left px-3 py-2">Nombre</th>
                     <th className="text-left px-3 py-2">Estado</th>
+                    <th className="text-left px-3 py-2">Registros Manuales</th>
                     <th className="px-3 py-2 text-center w-32">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading && (
-                    <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Cargando...</td></tr>
+                    <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">Cargando...</td></tr>
                   )}
                   {!loading && paginatedItems.length === 0 && (
-                    <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Sin resultados</td></tr>
+                    <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">Sin resultados</td></tr>
                   )}
                   {!loading && paginatedItems.map(eq => (
                     <tr key={eq.codigo_equipo} className="transition-colors bg-white hover:bg-gray-100">
@@ -246,6 +258,11 @@ export default function EquipoPage() {
                       <td className="px-3 py-2 align-middle">
                         <span className="inline-block rounded-full bg-green-600 text-white px-3 py-0.5 text-xs font-semibold">
                           Activo
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <span className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold ${eq.admite_registros_manuales ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
+                          {eq.admite_registros_manuales ? 'Sí' : 'No'}
                         </span>
                       </td>
                       <td className="px-3 py-1 text-center align-middle">

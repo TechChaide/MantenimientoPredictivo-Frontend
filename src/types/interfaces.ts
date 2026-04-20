@@ -320,9 +320,10 @@ export interface Historial {
 }
 
 export interface Equipo {
-  codigo_equipo: string; 
+  codigo_equipo: string;
   codigo_area: string;
   nombre_equipo: string;
+  admite_registros_manuales: boolean;
   estado: string;
 }
 
@@ -339,10 +340,57 @@ export interface Area {
   estado: string;
 }
 
-export interface CategoriaEvento { 
+export interface CategoriaEvento {
   codigo_categoria_evento: string;
   codigo_tipo_evento: string;
   descripcion: string;
   estado: string;
 }
 
+
+
+export interface Registros {
+  codigo_registro: string;
+  codigo_componente: string;
+  OT: string;
+  medicion: number;
+  valor: number;
+  unidades: string;
+  fecha_inicio_evento: Date | string;
+  fecha_fin_evento: Date | string;
+  usuario_creacion: string;
+  fecha_creacion: Date | string;
+  estado: string;
+}
+
+export interface TareasSismac {
+  ID_PLANTA: string;
+  PLANTA: string;
+  ID_AREA: string;
+  AREA: string;
+  ID_MAQUINA: string;
+  MAQUINA: string;
+  ID_COMP: string;
+  COMPONENTE: string;
+  TIPO_MTO: string;
+  TIPO_TAREA: string;
+  ID_TAREA: number;
+  TAREA: string;
+  FRECUENCIA: number;
+  MOP_TAREA: string;
+  TIEMPO: number;
+  FECHA_ULT: Date | string;
+  FECHA_PRO: Date | string;
+  DIAS_HOY: number;
+  OT_ULT: number;
+  OT_PRG: number;
+  TECNICO: string;
+  OT_PRG_ID: string;
+  FECHA_OT_PRG_INI: Date;
+  FECHA_OT_PRG_FIN: Date;
+  FECHA_OT_EJC_INI: Date;
+  FECHA_OT_EJC_FIN: Date;
+  FECHA_OT_PRD_INI: Date;
+  FECHA_OT_PRD_FIN: Date;
+
+}

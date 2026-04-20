@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, Fragment } from "react";
 import { tipoEventoService } from "@/services/tipoEvento.service";
 import { categoriaEventoService } from "@/services/categoriaEvento.service";
 import type { TipoEvento, CategoriaEvento } from "@/types/interfaces";
@@ -74,9 +74,9 @@ export default function TipoEventoPage() {
     if (!filter) return items;
     const f = filter.toLowerCase();
     return items.filter(it =>
-      String(it.codigo_tipo_evento).toLowerCase().includes(f) ||
-      it.nombre_evento.toLowerCase().includes(f) ||
-      it.estado.toLowerCase().includes(f)
+      String(it.codigo_tipo_evento ?? '').toLowerCase().includes(f) ||
+      String(it.nombre_evento ?? '').toLowerCase().includes(f) ||
+      String(it.estado ?? '').toLowerCase().includes(f)
     );
   }, [items, filter]);
 
@@ -296,8 +296,8 @@ export default function TipoEventoPage() {
                     const cats = categoriesMap[id] || [];
                     const loadingCats = !!categoriesLoadingMap[id];
                     return (
-                      <>
-                        <tr key={id} className="transition-colors bg-white hover:bg-gray-100">
+                      <Fragment key={id}>
+                        <tr className="transition-colors bg-white hover:bg-gray-100">
                           <td className="px-3 py-2 font-mono text-xs align-middle">{tipo.codigo_tipo_evento}</td>
                           <td onClick={() => toggleExpand(tipo)} className="px-3 py-2 align-middle cursor-pointer hover:underline">{tipo.nombre_evento}</td>
                           <td className="px-3 py-2 align-middle">
@@ -353,7 +353,7 @@ export default function TipoEventoPage() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     );
                   })}
                 </tbody>
