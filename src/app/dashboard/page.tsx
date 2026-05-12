@@ -17,6 +17,9 @@ import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useMemo } from 'react';
 import { calculosCorrientesDatosMantenimientoService } from "@/services/calculoscorrientesdatosmantenimiento.service";
+import { equipoService } from "@/services/equipo.service";
+import { areaService } from "@/services/area.service";
+import { checkMostrarTodosEquipos } from "@/lib/mostrar-todos-equipos";
 import { useToast } from "@/hooks/use-toast";
 
 function EmptyState() {
@@ -107,28 +110,38 @@ function DashboardContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 1. Fetch de Máquinas
+  // 1. Fetch de Máquinas (filtradas por regional del usuario, salvo MOSTRAR_TODOS_EQUIPOS)
   useEffect(() => {
     async function fetchInitialData() {
       try {
-        const machinesResponse = await calculosCorrientesDatosMantenimientoService.getMachines();
-        
-        if (machinesResponse.data && Array.isArray(machinesResponse.data)) {
-          const transformedMachines = machinesResponse.data
-          .filter((m: any) => m.MAQUINA)
-          .map((m: any) => {
-            const machineName = m.MAQUINA;
-            return {
-              id: machineName.toString(),
-              name: machineName.toString()
-            };
-          });
-          setMachineList(transformedMachines);
+        const [areasResp, equiposResp, mostrarTodos] = await Promise.all([
+          areaService.getAll(),
+          equipoService.getAll(),
+          checkMostrarTodosEquipos(),
+        ]);
+
+        const areas = Array.isArray(areasResp.data) ? areasResp.data : [];
+        const equipos = Array.isArray(equiposResp.data) ? equiposResp.data : [];
+
+        let maquinasFiltradas;
+        if (mostrarTodos) {
+          maquinasFiltradas = equipos
+            .filter(e => e.estado === 'A')
+            .map(e => ({ id: e.nombre_equipo, name: e.nombre_equipo }));
         } else {
-          console.error("Formato de respuesta inesperado para máquinas:", machinesResponse);
-          setMachineList([]);
+          const localidad = typeof window !== 'undefined' ? sessionStorage.getItem('usuario_localidad') : null;
+          const regional = localidad === 'GYE' ? 2000 : 1000;
+          const codigosAreaRegional = new Set(
+            areas
+              .filter(a => Number(a.regional) === regional && a.estado === 'A')
+              .map(a => String(a.codigo_area))
+          );
+          maquinasFiltradas = equipos
+            .filter(e => codigosAreaRegional.has(String(e.codigo_area)) && e.estado === 'A')
+            .map(e => ({ id: e.nombre_equipo, name: e.nombre_equipo }));
         }
 
+        setMachineList(maquinasFiltradas);
       } catch (error) {
         console.error("Error fetching initial data:", error);
         setMachineList([]);

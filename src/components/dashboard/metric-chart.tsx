@@ -466,6 +466,21 @@ export function MetricChart({
   const [rawTotal, setRawTotal] = useState<number | null>(null);
   const [rawEventsData, setRawEventsData] = useState<any[]>([]);
   const [sigmaLimit, setSigmaLimit] = useState<number | null>(null);
+  const [zonas, setZonas] = useState<{
+    seguraInf: number | null;
+    seguraSup: number | null;
+    alertaInf: number | null;
+    alertaSup: number | null;
+    criticaInf: number | null;
+    criticaSup: number | null;
+  }>({
+    seguraInf: null,
+    seguraSup: null,
+    alertaInf: null,
+    alertaSup: null,
+    criticaInf: null,
+    criticaSup: null,
+  });
   const [outlierEvents, setOutlierEvents] = useState<
     Array<{
       id: string;
@@ -563,6 +578,34 @@ export function MetricChart({
               const sigmaValue = Number(limiteEncontrado.sigma_limite) || null;
               console.log("✅ Sigma Limite cargado:", sigmaValue);
               setSigmaLimit(sigmaValue);
+              
+              // Cargar las zonas si existen
+              console.log("📊 Datos crudos de límite:", {
+                zona_segura_inf: limiteEncontrado.zona_segura_inf,
+                zona_segura_sup: limiteEncontrado.zona_segura_sup,
+                zona_alerta_inf: limiteEncontrado.zona_alerta_inf,
+                zona_alerta_sup: limiteEncontrado.zona_alerta_sup,
+                zona_critica_inf: limiteEncontrado.zona_critica_inf,
+                zona_critica_sup: limiteEncontrado.zona_critica_sup,
+              });
+              
+              const zonasCalculadas = {
+                seguraInf: limiteEncontrado.zona_segura_inf ? Number(limiteEncontrado.zona_segura_inf) : null,
+                seguraSup: limiteEncontrado.zona_segura_sup ? Number(limiteEncontrado.zona_segura_sup) : null,
+                alertaInf: limiteEncontrado.zona_alerta_inf ? Number(limiteEncontrado.zona_alerta_inf) : null,
+                alertaSup: limiteEncontrado.zona_alerta_sup ? Number(limiteEncontrado.zona_alerta_sup) : null,
+                criticaInf: limiteEncontrado.zona_critica_inf ? Number(limiteEncontrado.zona_critica_inf) : null,
+                criticaSup: limiteEncontrado.zona_critica_sup ? Number(limiteEncontrado.zona_critica_sup) : null,
+              };
+              
+              console.log("✅ Zonas calculadas:", zonasCalculadas);
+              setZonas(zonasCalculadas);
+              
+              // Verificar si hay al menos una zona seteada
+              const tieneZonas = Object.values(zonasCalculadas).some(v => v !== null);
+              if (!tieneZonas) {
+                console.warn("⚠️ No se encontraron zonas seteadas en los límites");
+              }
             } else {
               console.warn(
                 "⚠️ No se encontró sigma_limite para codigo_componente:",
@@ -2584,6 +2627,64 @@ export function MetricChart({
                     }}
                   />
                 ))}
+
+              {/* Bandas de zonas de registros manuales */}
+              {zonas.seguraInf !== null && zonas.seguraSup !== null && (
+                <ReferenceArea
+                  y1={zonas.seguraInf}
+                  y2={zonas.seguraSup}
+                  fill="#22c55e"
+                  fillOpacity={0.08}
+                  stroke="#22c55e"
+                  strokeOpacity={0.3}
+                  strokeDasharray="3 3"
+                  strokeWidth={1}
+                  label={{
+                    value: "Zona Segura",
+                    position: "right",
+                    fill: "#22c55e",
+                    fontSize: 11,
+                  }}
+                />
+              )}
+
+              {zonas.alertaInf !== null && zonas.alertaSup !== null && (
+                <ReferenceArea
+                  y1={zonas.alertaInf}
+                  y2={zonas.alertaSup}
+                  fill="#f59e0b"
+                  fillOpacity={0.08}
+                  stroke="#f59e0b"
+                  strokeOpacity={0.3}
+                  strokeDasharray="3 3"
+                  strokeWidth={1}
+                  label={{
+                    value: "Zona Alerta",
+                    position: "right",
+                    fill: "#f59e0b",
+                    fontSize: 11,
+                  }}
+                />
+              )}
+
+              {zonas.criticaInf !== null && zonas.criticaSup !== null && (
+                <ReferenceArea
+                  y1={zonas.criticaInf}
+                  y2={zonas.criticaSup}
+                  fill="#ef4444"
+                  fillOpacity={0.08}
+                  stroke="#ef4444"
+                  strokeOpacity={0.3}
+                  strokeDasharray="3 3"
+                  strokeWidth={1}
+                  label={{
+                    value: "Zona Crítica",
+                    position: "right",
+                    fill: "#ef4444",
+                    fontSize: 11,
+                  }}
+                />
+              )}
 
               <Line
                 type="monotone"

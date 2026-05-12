@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ReferenciasModal from "@/components/dashboard/referencias-modal";
 import LimitesModal from "@/components/dashboard/limites-modal";
+import LimitesManualModal from "@/components/dashboard/limites-manual-modal";
 import { componenteService } from "@/services/componente.service";
 import { equipoService } from "@/services/equipo.service";
 import type { Componente, Equipo } from "@/types/interfaces";
@@ -45,6 +46,7 @@ export default function ComponentePage() {
 
   const [showReferenciasModal, setShowReferenciasModal] = useState(false);
   const [showLimitesModal, setShowLimitesModal] = useState(false);
+  const [showLimitesManualModal, setShowLimitesManualModal] = useState(false);
   const [modalComponenteId, setModalComponenteId] = useState<string | null>(null);
   const [modalComponenteName, setModalComponenteName] = useState<string | null>(null);
 
@@ -239,15 +241,16 @@ export default function ComponentePage() {
                   <th className="text-left px-3 py-2">Equipo</th>
                   <th className="text-left px-3 py-2">Nombre</th>
                   <th className="text-left px-3 py-2">Estado</th>
+                  <th className="text-left px-3 py-2">Registros Manuales</th>
                   <th className="px-3 py-2 text-center w-32">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Cargando...</td></tr>
+                  <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">Cargando...</td></tr>
                 )}
                 {!loading && paginatedItems.length === 0 && (
-                  <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Sin resultados</td></tr>
+                  <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">Sin resultados</td></tr>
                 )}
                 {!loading && paginatedItems.map((comp) => (
                   <tr
@@ -261,6 +264,18 @@ export default function ComponentePage() {
                       <span className="inline-block rounded-full bg-green-600 text-white px-3 py-0.5 text-xs font-semibold">
                         Activo
                       </span>
+                    </td>
+                    <td className="px-3 py-2 align-middle">
+                      {(() => {
+                        const equipo = equipos.find(e => e.codigo_equipo === comp.codigo_equipo);
+                        return (
+                          <span className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold ${
+                            equipo?.admite_registros_manuales ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                          }`}>
+                            {equipo?.admite_registros_manuales ? 'Sí' : 'No'}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-3 py-1 text-center align-middle">
                       <DropdownMenu>
@@ -276,7 +291,16 @@ export default function ComponentePage() {
                           <DropdownMenuItem onClick={() => { setModalComponenteId(String(comp.codigo_componente)); setModalComponenteName(comp.nombre_componente); setShowReferenciasModal(true); }}>
                             📎 Referencias
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => { setModalComponenteId(String(comp.codigo_componente)); setModalComponenteName(comp.nombre_componente); setShowLimitesModal(true); }}>
+                          <DropdownMenuItem onClick={() => { 
+                            const equipo = equipos.find(e => e.codigo_equipo === comp.codigo_equipo);
+                            setModalComponenteId(String(comp.codigo_componente)); 
+                            setModalComponenteName(comp.nombre_componente);
+                            if (equipo?.admite_registros_manuales) {
+                              setShowLimitesManualModal(true);
+                            } else {
+                              setShowLimitesModal(true);
+                            }
+                          }}>
                             📏 Límites
                           </DropdownMenuItem>
                           <DropdownMenuItem
@@ -353,6 +377,7 @@ export default function ComponentePage() {
         <>
           <ReferenciasModal isOpen={showReferenciasModal} onClose={() => setShowReferenciasModal(false)} componenteId={modalComponenteId} componenteNombre={modalComponenteName ?? undefined} />
           <LimitesModal isOpen={showLimitesModal} onClose={() => setShowLimitesModal(false)} componenteId={modalComponenteId} componenteNombre={modalComponenteName ?? undefined} />
+          <LimitesManualModal isOpen={showLimitesManualModal} onClose={() => setShowLimitesManualModal(false)} componenteId={modalComponenteId} componenteNombre={modalComponenteName ?? undefined} />
         </>
       )}
 

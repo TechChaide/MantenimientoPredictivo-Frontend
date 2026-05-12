@@ -20,6 +20,7 @@ type FormState = {
 const emptyArea: Area = {
   codigo_area: 0 as any, // 0 para inserción
   nombre_area: "",
+  regional: 1000,
   estado: "A",
 };
 
@@ -93,6 +94,7 @@ export default function AreaPage() {
       const payload: Area = {
         codigo_area: form.mode === "edit" ? String(form.data.codigo_area ?? "") : "0",
         nombre_area: (form.data.nombre_area || "").trim(),
+        regional: Number(form.data.regional ?? 1000),
         estado: (form.data.estado || "A").trim(),
       };
       const respSaved = await areaService.save(payload);
@@ -165,6 +167,13 @@ export default function AreaPage() {
                   <Input id="nombre_area" value={form.data.nombre_area || ''} onChange={e => onChangeField('nombre_area', e.target.value)} required className="mt-1" />
                 </div>
                 <div className="mb-2">
+                  <Label htmlFor="regional">Regional *</Label>
+                  <select id="regional" className="w-full rounded-md border px-3 py-2 text-sm bg-white mt-1" value={form.data.regional ?? 1000} onChange={e => onChangeField('regional', e.target.value)}>
+                    <option value={1000}>Quito (1000)</option>
+                    <option value={2000}>Guayaquil (2000)</option>
+                  </select>
+                </div>
+                <div className="mb-2">
                   <Label htmlFor="estado">Estado *</Label>
                   <select id="estado" className="w-full rounded-md border px-3 py-2 text-sm bg-white mt-1" value={form.data.estado || 'A'} onChange={e => onChangeField('estado', e.target.value)}>
                     <option value="A">Activo</option>
@@ -190,21 +199,23 @@ export default function AreaPage() {
                   <tr>
                     <th className="text-left px-3 py-2 w-32">Código</th>
                     <th className="text-left px-3 py-2">Nombre</th>
+                    <th className="text-left px-3 py-2">Regional</th>
                     <th className="text-left px-3 py-2">Estado</th>
                     <th className="px-3 py-2 text-center w-32">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading && (
-                    <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-500">Cargando...</td></tr>
+                    <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Cargando...</td></tr>
                   )}
                   {!loading && paginatedItems.length === 0 && (
-                    <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">Sin resultados</td></tr>
+                    <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Sin resultados</td></tr>
                   )}
                   {!loading && paginatedItems.map(area => (
                     <tr key={area.codigo_area} className="transition-colors bg-white hover:bg-gray-100">
                       <td className="px-3 py-2 font-mono text-xs align-middle">{area.codigo_area}</td>
                       <td className="px-3 py-2 align-middle">{area.nombre_area}</td>
+                      <td className="px-3 py-2 align-middle">{area.regional === 1000 ? 'Quito' : area.regional === 2000 ? 'Guayaquil' : area.regional}</td>
                       <td className="px-3 py-2 align-middle">
                         <span className="inline-block rounded-full bg-green-600 text-white px-3 py-0.5 text-xs font-semibold">
                           Activo

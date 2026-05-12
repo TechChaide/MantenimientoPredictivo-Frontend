@@ -6,6 +6,7 @@ import { equipoService } from "@/services/equipo.service";
 import { componenteService } from "@/services/componente.service";
 import { areaService } from "@/services/area.service";
 import { serviciosService } from "@/services/servicios.service";
+import { checkMostrarTodosEquipos } from "@/lib/mostrar-todos-equipos";
 import type { Registros, Equipo, Componente, Area, TareasSismac } from "@/types/interfaces";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,6 +26,54 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 // Función helper para convertir fecha a zona horaria de Ecuador (UTC-5)
+
+// Función para convertir número a letra (1->A, 2->B, etc.)
+const numeroALetra = (numero: number): string => {
+  return String.fromCharCode(64 + numero); // 64 + 1 = 65 (A)
+};
+
+/**
+ * Normaliza el texto libre que ingresa el técnico a la unidad estándar.
+ * Temperatura → °C o °F  |  Vibración → mm/s RMS, in/s RMS, mm pk-pk, in pk-pk, g RMS, Hz
+ */
+export function normalizarUnidad(input: string): string {
+  const raw = input.trim().toLowerCase().replace(/\s+/g, " ");
+
+  // ── Temperatura ──────────────────────────────────────────────
+  if (/^[°]?c$|celsius|centigrado|centigrade|temp.*c|grado/.test(raw)) return "°C";
+  if (/^[°]?f$|fahrenheit|temp.*f/.test(raw)) return "°F";
+
+  // ── Vibración Hz ─────────────────────────────────────────────
+  if (/hz|hertz|frecuen/.test(raw)) return "Hz";
+
+  // ── Vibración g RMS ──────────────────────────────────────────
+  if (/^g\s?rms$|^grms$|^g$/.test(raw)) return "g RMS";
+
+  // ── Vibración mm/s RMS ───────────────────────────────────────
+  if (/mm\s?\/\s?s/.test(raw)) {
+    if (/pk|pico|peak/.test(raw)) return "mm pk-pk";
+    return "mm/s RMS";
+  }
+
+  // ── Vibración in/s RMS ───────────────────────────────────────
+  if (/in\s?\/\s?s|inch\s?\/\s?s/.test(raw)) {
+    if (/pk|pico|peak/.test(raw)) return "in pk-pk";
+    return "in/s RMS";
+  }
+
+  // ── Vibración mm pk-pk ───────────────────────────────────────
+  if (/mm.*pk|mm.*pico|mm.*peak/.test(raw)) return "mm pk-pk";
+
+  // ── Vibración in pk-pk ───────────────────────────────────────
+  if (/in.*pk|in.*pico|in.*peak/.test(raw)) return "in pk-pk";
+
+  // ── Vibración genérica ───────────────────────────────────────
+  if (/vibra|acele|rms/.test(raw)) return "mm/s RMS";
+
+  // Sin coincidencia: devolver el valor tal cual (en mayúsculas)
+  return input.trim();
+}
+
 type Medicion = {
   id: string;
   numero: number;
@@ -46,6 +95,7 @@ export function HandyRegClient() {
   const [areas, setAreas] = useState<Area[]>([]);
   const [tareasSismac, setTareasSismac] = useState<TareasSismac[]>([]);
   const [loadingTareas, setLoadingTareas] = useState(false);
+  const [mostrarTodosEquipos, setMostrarTodosEquipos] = useState(false);
 
   // Selecciones del usuario
   const [selectedEquipo, setSelectedEquipo] = useState<string | null>(null);
@@ -152,14 +202,16 @@ export function HandyRegClient() {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [equiposRes, componentesRes, areasRes] = await Promise.all([
+        const [equiposRes, componentesRes, areasRes, mostrarTodos] = await Promise.all([
           equipoService.getAll(),
           componenteService.getAll(),
           areaService.getAll(),
+          checkMostrarTodosEquipos(),
         ]);
         setEquipos(equiposRes.data || []);
         setComponentes(componentesRes.data || []);
         setAreas(areasRes.data || []);
+        setMostrarTodosEquipos(mostrarTodos);
 
         // Consulta exploratoria: 10,000 registros
         const pageSize = 10000;
@@ -214,8 +266,31 @@ export function HandyRegClient() {
     ? componentes.filter((c) => c.codigo_equipo === selectedEquipo)
     : [];
 
-  // Filtrar equipos que admiten registros manuales
-  const equiposFiltrados = equipos.filter((e) => e.admite_registros_manuales === true);
+  // Regional del usuario en sesión (UIO -> 1000, GYE -> 2000)
+  const localidadUsuario = typeof window !== 'undefined' ? sessionStorage.getItem('usuario_localidad') : null;
+  const regionalUsuario = localidadUsuario === 'GYE' ? 2000 : 1000;
+
+  // Códigos de área que pertenecen a la regional del usuario
+  const codigosAreaRegional = new Set(
+    areas
+      .filter(a => Number(a.regional) === regionalUsuario && a.estado === 'A')
+      .map(a => String(a.codigo_area))
+  );
+
+  // Filtrar equipos que admiten registros manuales Y pertenecen a la regional del usuario
+  // (si mostrarTodosEquipos, se omite el filtro regional)
+  const equiposFiltrados = equipos.filter(
+    (e) => e.admite_registros_manuales === true &&
+      (mostrarTodosEquipos || codigosAreaRegional.has(String(e.codigo_area)))
+  );
+
+  // Helper: etiqueta de regional a partir del área
+  const getRegionalLabel = (area: Area | null | undefined): string => {
+    if (!area) return '';
+    if (Number(area.regional) === 1000) return 'Quito';
+    if (Number(area.regional) === 2000) return 'Guayaquil';
+    return String(area.regional);
+  };
 
   // Obtener el nombre del equipo seleccionado
   const equipoSeleccionado = equipos.find((e) => e.codigo_equipo === selectedEquipo);
@@ -315,17 +390,15 @@ export function HandyRegClient() {
     field: keyof Medicion,
     value: string | number
   ) => {
+    let sanitized: string | number = value;
+    if (field === "unidades") {
+      sanitized = String(value).toUpperCase().replace(/[^A-Z]/g, "");
+    } else if (field === "numero") {
+      sanitized = parseInt(String(value)) || 0;
+    }
     setMediciones(
       mediciones.map((m) =>
-        m.id === id
-          ? {
-              ...m,
-              [field]:
-                field === "numero"
-                  ? parseInt(String(value)) || 0
-                  : value,
-            }
-          : m
+        m.id === id ? { ...m, [field]: sanitized } : m
       )
     );
   };
@@ -446,7 +519,7 @@ export function HandyRegClient() {
           OT: ot,
           medicion: med.numero,
           valor: parseFloat(String(med.valor)),
-          unidades: med.unidades,
+          unidades: normalizarUnidad(med.unidades),
           fecha_inicio_evento: fechaInicioISO,
           fecha_fin_evento: fechaFinISO,
           usuario_creacion: sessionStorage.getItem('usuario_codigo') || sessionStorage.getItem('usuario_nombre') || "No Definido",
@@ -833,7 +906,7 @@ export function HandyRegClient() {
                             <p className="text-xs text-gray-500 mt-1">
                               {equipo.codigo_equipo}
                             </p>
-                            <div className="mt-3">
+                            <div className="mt-3 flex flex-wrap gap-2">
                               <span
                                 className={`inline-block px-2 py-1 rounded text-xs font-medium ${
                                   equipo.estado === "A"
@@ -843,6 +916,15 @@ export function HandyRegClient() {
                               >
                                 {equipo.estado === "A" ? "Activo" : "Inactivo"}
                               </span>
+                              {(() => {
+                                const area = areas.find(a => String(a.codigo_area) === String(equipo.codigo_area));
+                                const label = getRegionalLabel(area);
+                                return label ? (
+                                  <span className="inline-block px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                                    {label}
+                                  </span>
+                                ) : null;
+                              })()}
                             </div>
                           </CardContent>
                         </Card>
@@ -907,6 +989,9 @@ export function HandyRegClient() {
                 {selectedEquipo && selectedComponente && (
                   <Card className="bg-blue-50 border-blue-200">
                     <CardContent className="pt-6 space-y-2">
+                      <p className="text-sm font-medium">
+                        Regional: <span className="text-blue-700">{getRegionalLabel(areaSeleccionada)}</span>
+                      </p>
                       <p className="text-sm font-medium">
                         Área: <span className="text-blue-700">{areaSeleccionada?.nombre_area}</span>
                       </p>
@@ -1049,7 +1134,7 @@ export function HandyRegClient() {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-100">
                       <tr>
-                        <th className="px-4 py-3 text-left font-medium">Medición #</th>
+                        <th className="px-4 py-3 text-left font-medium">Medición</th>
                         <th className="px-4 py-3 text-left font-medium">Valor</th>
                         <th className="px-4 py-3 text-left font-medium">Unidades</th>
                         <th className="px-4 py-3 text-left font-medium">Acciones</th>
@@ -1058,8 +1143,8 @@ export function HandyRegClient() {
                     <tbody>
                       {mediciones.map((medicion, idx) => (
                         <tr key={medicion.id} className="border-t hover:bg-gray-50">
-                          <td className="px-4 py-3 text-center font-medium">
-                            {medicion.numero}
+                          <td className="px-4 py-3 text-center font-bold text-lg text-blue-600">
+                            {numeroALetra(medicion.numero)}
                           </td>
                           <td className="px-4 py-3">
                             <Input
@@ -1076,16 +1161,24 @@ export function HandyRegClient() {
                             />
                           </td>
                           <td className="px-4 py-3">
-                            <Input
-                              type="text"
-                              placeholder="Ej: mm, psi, °C"
-                              value={medicion.unidades}
-                              onChange={(e) =>
-                                handleMedicionChange(medicion.id, "unidades", e.target.value)
-                              }
-                              className="w-full"
-                              disabled={saving || !trabajoIniciado}
-                            />
+                            <div className="space-y-1">
+                              <Input
+                                type="text"
+                                placeholder="Ej: C, F, mm/s, g..."
+                                value={medicion.unidades}
+                                onChange={(e) =>
+                                  handleMedicionChange(medicion.id, "unidades", e.target.value)
+                                }
+                                className="w-full"
+                                disabled={saving || !trabajoIniciado}
+                                required
+                              />
+                              {medicion.unidades.trim() && (
+                                <p className="text-xs text-blue-600 font-medium">
+                                  → {normalizarUnidad(medicion.unidades)}
+                                </p>
+                              )}
+                            </div>
                           </td>
                           <td className="px-4 py-3 flex items-center gap-2">
                             {idx === mediciones.length - 1 ? (
