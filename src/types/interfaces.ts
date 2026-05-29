@@ -361,13 +361,25 @@ export interface Registros {
   codigo_componente: string;
   OT: string;
   medicion: number;
-  valor: number;
-  unidades: string;
+  tiempo_utilizado: number;
+  fecha_evento?: Date | string;
   fecha_inicio_evento: Date | string;
   fecha_fin_evento: Date | string;
   usuario_creacion: string;
   fecha_creacion: Date | string;
   estado: string;
+}
+
+export interface Detalles {
+  codigo_detalle: number;
+  codigo_registro: number;
+  valor: number;
+  unidades: string;
+  orientacion: string;
+  fecha_medicion: string;
+  estado: string;
+  fecha_modificacion: Date | string;
+  usuario_modificacion: string;
 }
 
 export interface TareasSismac {

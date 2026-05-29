@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { registrosService } from "@/services/registros.service";
+import { detallesService } from "@/services/detalles.service";
 import { equipoService } from "@/services/equipo.service";
 import { componenteService } from "@/services/componente.service";
 import { areaService } from "@/services/area.service";
 import { serviciosService } from "@/services/servicios.service";
 import { checkMostrarTodosEquipos } from "@/lib/mostrar-todos-equipos";
-import type { Registros, Equipo, Componente, Area, TareasSismac } from "@/types/interfaces";
+import type { Registros, Detalles, Equipo, Componente, Area, TareasSismac } from "@/types/interfaces";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, Loader2, Save, Plus, Trash2, ChevronRight, ChevronLeft, Search, Play, Square, CheckCircle, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { AlertTriangle, Loader2, Save, Plus, Trash2, ChevronRight, ChevronLeft, Search, Play, Square, CheckCircle, ChevronsLeft, ChevronsRight, Activity, Thermometer } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -74,12 +75,48 @@ export function normalizarUnidad(input: string): string {
   return input.trim();
 }
 
+const parseValorDecimal = (value: string | number): number => {
+  const normalizado = String(value).trim().replace(/,/g, ".");
+  if (!normalizado) return Number.NaN;
+  return Number(normalizado);
+};
+
 type Medicion = {
   id: string;
   numero: number;
   valor: string | number;
   unidades: string;
 };
+
+type EntradaOrientacion = {
+  id: string;
+  valor: string;
+  unidades: string;
+};
+
+type OrientacionKey = 'vertical' | 'horizontal' | 'axial';
+
+type MedicionVibracion = {
+  id: string;
+  numero: number;
+  expanded: boolean;
+  activeOrientaciones: Record<OrientacionKey, boolean>;
+  vertical: EntradaOrientacion[];
+  horizontal: EntradaOrientacion[];
+  axial: EntradaOrientacion[];
+};
+
+type TipoMedicion = 'vibracion' | 'temperatura';
+
+const crearMedicionVibracion = (numero: number): MedicionVibracion => ({
+  id: String(numero),
+  numero,
+  expanded: true,
+  activeOrientaciones: { vertical: true, horizontal: true, axial: true },
+  vertical: [{ id: `v1_${numero}`, valor: "", unidades: "" }, { id: `v2_${numero}`, valor: "", unidades: "" }],
+  horizontal: [{ id: `h1_${numero}`, valor: "", unidades: "" }, { id: `h2_${numero}`, valor: "", unidades: "" }],
+  axial: [{ id: `a1_${numero}`, valor: "", unidades: "" }, { id: `a2_${numero}`, valor: "", unidades: "" }],
+});
 
 type StepperStep = 1 | 2;
 
@@ -108,6 +145,12 @@ export function HandyRegClient() {
     return `${tarea.ID_COMP}|${tarea.TIPO_MTO}|${tarea.TIPO_TAREA}|${tarea.ID_TAREA}`;
   };
 
+  const getOtProgramada = (tarea: TareasSismac): string => {
+    const value = (tarea as unknown as { OT_PRG?: number | string | null }).OT_PRG;
+    if (value === null || value === undefined) return "";
+    return String(value).trim();
+  };
+
   // Tabla de mediciones
   const [mediciones, setMediciones] = useState<Medicion[]>([
     { id: "1", numero: 1, valor: "", unidades: "" },
@@ -132,6 +175,16 @@ export function HandyRegClient() {
   // Estados para modal de confirmación
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [registrosToConfirm, setRegistrosToConfirm] = useState<Registros[]>([]);
+  const [showDeleteEjeModal, setShowDeleteEjeModal] = useState(false);
+  const [deleteEjeTarget, setDeleteEjeTarget] = useState<{
+    medicionId: string;
+    orientacion: OrientacionKey;
+    label: string;
+  } | null>(null);
+
+  // Tipo de medición y mediciones de vibración
+  const [tipoMedicion, setTipoMedicion] = useState<TipoMedicion | null>(null);
+  const [medicionesVibracion, setMedicionesVibracion] = useState<MedicionVibracion[]>(() => [crearMedicionVibracion(1)]);
 
   // Estados para vista de registros
   const [registrosHistorico, setRegistrosHistorico] = useState<Registros[]>([]);
@@ -342,6 +395,9 @@ export function HandyRegClient() {
 
   // Filtrar tareas según el término de búsqueda
   const tareasFiltradas = tareasSismac.filter((tarea) => {
+    const otProgramada = getOtProgramada(tarea);
+    if (!otProgramada) return false;
+
     const searchLower = searchTerm.toLowerCase();
     return (
       tarea.TAREA.toLowerCase().includes(searchLower) ||
@@ -403,6 +459,235 @@ export function HandyRegClient() {
     );
   };
 
+  // ── Handlers de Vibración ───────────────────────────────────────────────────
+
+  const handleAddMedicionVibracion = () => {
+    const newNumero = medicionesVibracion.length + 1;
+    setMedicionesVibracion([...medicionesVibracion, crearMedicionVibracion(newNumero)]);
+  };
+
+  const handleRemoveMedicionVibracion = (id: string) => {
+    if (medicionesVibracion.length === 1) return;
+    const filtered = medicionesVibracion.filter((m) => m.id !== id);
+    const renumbered = filtered.map((m, idx) => ({ ...m, numero: idx + 1 }));
+    setMedicionesVibracion(renumbered);
+  };
+
+  const handleToggleExpand = (id: string) => {
+    setMedicionesVibracion(
+      medicionesVibracion.map((m) => (m.id === id ? { ...m, expanded: !m.expanded } : m))
+    );
+  };
+
+  const handleOrientacionUnidades = (
+    medicionId: string,
+    orientacion: 'vertical' | 'horizontal' | 'axial',
+    entradaId: string,
+    unidades: string
+  ) => {
+    setMedicionesVibracion(
+      medicionesVibracion.map((m) => {
+        if (m.id !== medicionId) return m;
+        return {
+          ...m,
+          [orientacion]: m[orientacion].map((e) =>
+            e.id === entradaId ? { ...e, unidades } : e
+          ),
+        };
+      })
+    );
+  };
+
+  const handleOrientacionChange = (
+    medicionId: string,
+    orientacion: 'vertical' | 'horizontal' | 'axial',
+    entradaId: string,
+    valor: string
+  ) => {
+    const valorNormalizado = valor.replace(/,/g, ".");
+    setMedicionesVibracion(
+      medicionesVibracion.map((m) => {
+        if (m.id !== medicionId) return m;
+        return {
+          ...m,
+          [orientacion]: m[orientacion].map((e) =>
+            e.id === entradaId ? { ...e, valor: valorNormalizado } : e
+          ),
+        };
+      })
+    );
+  };
+
+  const handleAddOrientacionEntry = (
+    medicionId: string,
+    orientacion: 'vertical' | 'horizontal' | 'axial'
+  ) => {
+    const ts = Date.now();
+    setMedicionesVibracion(
+      medicionesVibracion.map((m) => {
+        if (m.id !== medicionId) return m;
+        // Añade la nueva entrada en los 3 ejes para mantener la misma cantidad
+        const newV: EntradaOrientacion = { id: `v${m.vertical.length + 1}_${ts}`,   valor: "", unidades: "" };
+        const newH: EntradaOrientacion = { id: `h${m.horizontal.length + 1}_${ts}`, valor: "", unidades: "" };
+        const newA: EntradaOrientacion = { id: `a${m.axial.length + 1}_${ts}`,      valor: "", unidades: "" };
+        return {
+          ...m,
+          vertical:   [...m.vertical,   newV],
+          horizontal: [...m.horizontal, newH],
+          axial:      [...m.axial,      newA],
+        };
+      })
+    );
+  };
+
+  const handleRemoveOrientacionEntry = (
+    medicionId: string,
+    orientacion: 'vertical' | 'horizontal' | 'axial',
+    entradaId: string
+  ) => {
+    setMedicionesVibracion(
+      medicionesVibracion.map((m) => {
+        if (m.id !== medicionId) return m;
+        if (m[orientacion].length <= 1) return m;
+        // Calcular el índice de la entrada eliminada para replicarlo en los otros ejes
+        const idx = m[orientacion].findIndex((e) => e.id === entradaId);
+        if (idx === -1) return m;
+        const removeAt = (arr: EntradaOrientacion[]) =>
+          arr.length > 1 ? arr.filter((_, i) => i !== idx) : arr;
+        return {
+          ...m,
+          vertical:   removeAt(m.vertical),
+          horizontal: removeAt(m.horizontal),
+          axial:      removeAt(m.axial),
+        };
+      })
+    );
+  };
+
+  const getEntradasActivas = (med: MedicionVibracion): EntradaOrientacion[] => {
+    const entries: EntradaOrientacion[] = [];
+    if (med.activeOrientaciones.vertical) entries.push(...med.vertical);
+    if (med.activeOrientaciones.horizontal) entries.push(...med.horizontal);
+    if (med.activeOrientaciones.axial) entries.push(...med.axial);
+    return entries;
+  };
+
+  const getOrientacionesActivas = (med: MedicionVibracion) => {
+    const orientaciones: { nombre: string; entradas: EntradaOrientacion[] }[] = [];
+    if (med.activeOrientaciones.vertical) orientaciones.push({ nombre: "Vertical", entradas: med.vertical });
+    if (med.activeOrientaciones.horizontal) orientaciones.push({ nombre: "Horizontal", entradas: med.horizontal });
+    if (med.activeOrientaciones.axial) orientaciones.push({ nombre: "Axial", entradas: med.axial });
+    return orientaciones;
+  };
+
+  const requestRemoveEje = (medicionId: string, orientacion: OrientacionKey, label: string) => {
+    setDeleteEjeTarget({ medicionId, orientacion, label });
+    setShowDeleteEjeModal(true);
+  };
+
+  const confirmRemoveEje = () => {
+    if (!deleteEjeTarget) return;
+
+    const target = deleteEjeTarget;
+    const medicionObjetivo = medicionesVibracion.find((m) => m.id === target.medicionId);
+    if (!medicionObjetivo) {
+      setShowDeleteEjeModal(false);
+      setDeleteEjeTarget(null);
+      return;
+    }
+
+    const activeCount = Object.values(medicionObjetivo.activeOrientaciones).filter(Boolean).length;
+    if (activeCount <= 1) {
+      toast({
+        title: "Acción no permitida",
+        description: "Debe quedar al menos un eje activo para registrar la medición.",
+        variant: "default",
+      });
+      setShowDeleteEjeModal(false);
+      setDeleteEjeTarget(null);
+      return;
+    }
+
+    setMedicionesVibracion((prev) =>
+      prev.map((m) =>
+        m.id !== target.medicionId
+          ? m
+          : {
+              ...m,
+              activeOrientaciones: {
+                ...m.activeOrientaciones,
+                [target.orientacion]: false,
+              },
+            }
+      )
+    );
+
+    setShowDeleteEjeModal(false);
+    setDeleteEjeTarget(null);
+  };
+
+  const handleRestoreEje = (medicionId: string, orientacion: OrientacionKey) => {
+    setMedicionesVibracion((prev) =>
+      prev.map((m) => {
+        if (m.id !== medicionId) return m;
+        return {
+          ...m,
+          activeOrientaciones: {
+            ...m.activeOrientaciones,
+            [orientacion]: true,
+          },
+        };
+      })
+    );
+  };
+
+  const prepareRegistrosVibracionToSave = (): Registros[] => {
+    const tiempoUtilizadoSegundos = calcularTiempoUtilizadoSegundos();
+    return medicionesVibracion.map((med): Registros => {
+      let fechaInicioISO = "2026-01-01T00:00:00.000";
+      if (fechaEvento) {
+        const fecha = new Date(fechaEvento);
+        fecha.setHours(fecha.getHours() - 5);
+        fechaInicioISO = fecha.toISOString().split('.')[0] + ".000";
+      } else {
+        const ahora = new Date();
+        ahora.setHours(ahora.getHours() - 5);
+        fechaInicioISO = ahora.toISOString().split('.')[0] + ".000";
+      }
+      let fechaFinISO = "2026-01-01T00:00:00.000";
+      if (fechaFinEvento) {
+        const fechaFin = new Date(fechaFinEvento);
+        fechaFin.setHours(fechaFin.getHours() - 5);
+        fechaFinISO = fechaFin.toISOString().split('.')[0] + ".000";
+      } else {
+        const ahora = new Date();
+        ahora.setHours(ahora.getHours() - 5);
+        fechaFinISO = ahora.toISOString().split('.')[0] + ".000";
+      }
+      const ahora = new Date();
+      ahora.setHours(ahora.getHours() - 5);
+      const fechaCreacionISO = ahora.toISOString().split('.')[0] + ".000";
+      return {
+        codigo_registro: "0",
+        codigo_componente: selectedComponente!,
+        OT: ot,
+        medicion: med.numero,
+        tiempo_utilizado: tiempoUtilizadoSegundos,
+        valor: 0,
+        unidades: (() => {
+          const first = getEntradasActivas(med).find((e) => e.unidades.trim());
+          return first ? normalizarUnidad(first.unidades) : "";
+        })(),
+        fecha_evento: fechaInicioISO,
+        fecha_inicio_evento: fechaInicioISO,
+        fecha_fin_evento: fechaFinISO,
+        usuario_creacion: sessionStorage.getItem('usuario_codigo') || sessionStorage.getItem('usuario_nombre') || "No Definido",
+        fecha_creacion: fechaCreacionISO,
+        estado: estado,
+      } as unknown as Registros;
+    });
+  };
+
   const handleNextStep = () => {
     if (!selectedEquipo) {
       setError("Debes seleccionar una máquina");
@@ -456,22 +741,46 @@ export function HandyRegClient() {
       return;
     }
 
-    // Validar mediciones
-    for (const med of mediciones) {
-      const valorNumerico = parseFloat(String(med.valor));
-      if (!med.valor || valorNumerico === 0 || isNaN(valorNumerico)) {
-        setError(`Medición ${med.numero}: El valor es requerido y debe ser mayor que 0`);
-        return;
-      }
-      if (!med.unidades.trim()) {
-        setError(`Medición ${med.numero}: Las unidades son requeridas`);
-        return;
-      }
+    // Validar tipo de medición
+    if (!tipoMedicion) {
+      setError("Debes seleccionar el tipo de medición (Vibración o Temperatura)");
+      return;
     }
 
-    // Preparar registros y mostrar modal
-    const registros = prepareRegistrosToSave();
-    setRegistrosToConfirm(registros);
+    if (tipoMedicion === 'vibracion') {
+      for (const med of medicionesVibracion) {
+        const allEntries = getEntradasActivas(med);
+        const hasValidValues = allEntries.some((e) => e.valor.trim() !== "" && !isNaN(parseValorDecimal(e.valor)));
+        if (!hasValidValues) {
+          setError(`Medición ${numeroALetra(med.numero)}: Debe ingresar al menos un valor numérico`);
+          return;
+        }
+        for (const e of allEntries) {
+          if (e.valor.trim() !== "" && !isNaN(parseValorDecimal(e.valor)) && !e.unidades.trim()) {
+            setError(`Medición ${numeroALetra(med.numero)}: Cada valor ingresado requiere su unidad`);
+            return;
+          }
+        }
+      }
+      const registros = prepareRegistrosVibracionToSave();
+      setRegistrosToConfirm(registros);
+    } else {
+      // Temperatura: validación original
+      for (const med of mediciones) {
+        const valorNumerico = parseValorDecimal(med.valor);
+        if (!med.valor || valorNumerico === 0 || isNaN(valorNumerico)) {
+          setError(`Medición ${med.numero}: El valor es requerido y debe ser mayor que 0`);
+          return;
+        }
+        if (!med.unidades.trim()) {
+          setError(`Medición ${med.numero}: Las unidades son requeridas`);
+          return;
+        }
+      }
+      const registros = prepareRegistrosToSave();
+      setRegistrosToConfirm(registros);
+    }
+
     setShowConfirmModal(true);
   };
 
@@ -482,8 +791,19 @@ export function HandyRegClient() {
     return `${String(horas).padStart(2, "0")}:${String(minutos).padStart(2, "0")}:${String(segs).padStart(2, "0")}`;
   };
 
+  const calcularTiempoUtilizadoSegundos = (): number => {
+    if (tiempoTranscurrido > 0) return tiempoTranscurrido;
+    if (!fechaEvento) return 0;
+
+    const inicio = new Date(fechaEvento).getTime();
+    const fin = fechaFinEvento ? new Date(fechaFinEvento).getTime() : Date.now();
+    const diferencia = Math.floor((fin - inicio) / 1000);
+    return diferencia > 0 ? diferencia : 0;
+  };
+
   // Función auxiliar para preparar registros sin guardarlos
   const prepareRegistrosToSave = (): Registros[] => {
+    const tiempoUtilizadoSegundos = calcularTiempoUtilizadoSegundos();
     const registrosToSave = mediciones.map(
       (med): Registros => {
         let fechaInicioISO = "2026-01-01T00:00:00";
@@ -518,14 +838,16 @@ export function HandyRegClient() {
           codigo_componente: selectedComponente!,
           OT: ot,
           medicion: med.numero,
-          valor: parseFloat(String(med.valor)),
+          tiempo_utilizado: tiempoUtilizadoSegundos,
+          valor: parseValorDecimal(med.valor),
           unidades: normalizarUnidad(med.unidades),
+          fecha_evento: fechaInicioISO,
           fecha_inicio_evento: fechaInicioISO,
           fecha_fin_evento: fechaFinISO,
           usuario_creacion: sessionStorage.getItem('usuario_codigo') || sessionStorage.getItem('usuario_nombre') || "No Definido",
           fecha_creacion: fechaCreacionISO,
           estado: estado,
-        };
+        } as unknown as Registros;
       }
     );
     return registrosToSave;
@@ -535,9 +857,60 @@ export function HandyRegClient() {
     try {
       setSaving(true);
       
-      // Enviar todos los registros
-      for (const registro of registrosToConfirm) {
-        await registrosService.save(registro);
+      // Enviar todos los registros y sus detalles asociados
+      for (let i = 0; i < registrosToConfirm.length; i++) {
+        const registro = registrosToConfirm[i];
+        const registroPayload = {
+          ...registro,
+          fecha_evento: (registro as unknown as { fecha_evento?: Date | string }).fecha_evento || registro.fecha_inicio_evento,
+        } as unknown as Registros;
+        const savedRes = await registrosService.save(registroPayload);
+        const codigoRegistro = savedRes.data?.codigo_registro;
+
+        if (codigoRegistro) {
+          const ahora = new Date();
+          ahora.setHours(ahora.getHours() - 5);
+          const usuario = sessionStorage.getItem('usuario_codigo') || sessionStorage.getItem('usuario_nombre') || "No Definido";
+          const fechaMod = ahora.toISOString().split('.')[0] + ".000";
+
+          if (tipoMedicion === 'vibracion') {
+            const med = medicionesVibracion[i];
+            const orientaciones = getOrientacionesActivas(med);
+            for (const ori of orientaciones) {
+              for (const entrada of ori.entradas) {
+                const valorNum = parseValorDecimal(entrada.valor);
+                if (!isNaN(valorNum) && entrada.valor.trim() !== "") {
+                  const detalle: Detalles = {
+                    codigo_detalle: 0,
+                    codigo_registro: Number(codigoRegistro),
+                    valor: valorNum,
+                    unidades: normalizarUnidad(entrada.unidades),
+                    orientacion: ori.nombre,
+                    fecha_medicion: fechaEvento || new Date().toISOString().slice(0, 16),
+                    estado: estado,
+                    fecha_modificacion: fechaMod,
+                    usuario_modificacion: usuario,
+                  };
+                  await detallesService.save(detalle);
+                }
+              }
+            }
+          } else {
+            const med = mediciones[i];
+            const detalle: Detalles = {
+              codigo_detalle: 0,
+              codigo_registro: Number(codigoRegistro),
+              valor: parseValorDecimal(med.valor),
+              unidades: normalizarUnidad(med.unidades),
+              orientacion: "Radial",
+              fecha_medicion: fechaEvento || new Date().toISOString().slice(0, 16),
+              estado: estado,
+              fecha_modificacion: fechaMod,
+              usuario_modificacion: usuario,
+            };
+            await detallesService.save(detalle);
+          }
+        }
       }
 
       toast({
@@ -558,6 +931,8 @@ export function HandyRegClient() {
       setSelectedTarea(null);
       setSearchTerm("");
       setMediciones([{ id: "1", numero: 1, valor: "", unidades: "" }]);
+      setTipoMedicion(null);
+      setMedicionesVibracion([crearMedicionVibracion(1)]);
       setFechaEvento(new Date().toISOString().slice(0, 16));
       setFechaFinEvento("");
       setOt("");
@@ -583,28 +958,100 @@ export function HandyRegClient() {
       return;
     }
 
+    // Validar tipo de medición
+    if (!tipoMedicion) {
+      setError("Debes seleccionar el tipo de medición (Vibración o Temperatura)");
+      return;
+    }
+
     // Validar mediciones
-    for (const med of mediciones) {
-      const valorNumerico = parseFloat(String(med.valor));
-      if (!med.valor || valorNumerico === 0 || isNaN(valorNumerico)) {
-        setError(`Medición ${med.numero}: El valor es requerido y debe ser mayor que 0`);
-        return;
+    if (tipoMedicion === 'vibracion') {
+      for (const med of medicionesVibracion) {
+        const allEntries = getEntradasActivas(med);
+        if (!allEntries.some((e) => e.valor.trim() !== "" && !isNaN(parseValorDecimal(e.valor)))) {
+          setError(`Medición ${numeroALetra(med.numero)}: Debe ingresar al menos un valor numérico`);
+          return;
+        }
+        for (const e of allEntries) {
+          if (e.valor.trim() !== "" && !isNaN(parseValorDecimal(e.valor)) && !e.unidades.trim()) {
+            setError(`Medición ${numeroALetra(med.numero)}: Cada valor ingresado requiere su unidad`);
+            return;
+          }
+        }
       }
-      if (!med.unidades.trim()) {
-        setError(`Medición ${med.numero}: Las unidades son requeridas`);
-        return;
+    } else {
+      for (const med of mediciones) {
+        const valorNumerico = parseValorDecimal(med.valor);
+        if (!med.valor || valorNumerico === 0 || isNaN(valorNumerico)) {
+          setError(`Medición ${med.numero}: El valor es requerido y debe ser mayor que 0`);
+          return;
+        }
+        if (!med.unidades.trim()) {
+          setError(`Medición ${med.numero}: Las unidades son requeridas`);
+          return;
+        }
       }
     }
 
     try {
       setSaving(true);
 
-      // Preparar registros usando la función auxiliar
-      const registrosToSave = prepareRegistrosToSave();
+      const registrosToSave = tipoMedicion === 'vibracion'
+        ? prepareRegistrosVibracionToSave()
+        : prepareRegistrosToSave();
 
-      // Enviar todos los registros
-      for (const registro of registrosToSave) {
-        await registrosService.save(registro);
+      // Enviar todos los registros y sus detalles asociados
+      for (let i = 0; i < registrosToSave.length; i++) {
+        const registro = registrosToSave[i];
+        const registroPayload = {
+          ...registro,
+          fecha_evento: (registro as unknown as { fecha_evento?: Date | string }).fecha_evento || registro.fecha_inicio_evento,
+        } as unknown as Registros;
+        const savedRes = await registrosService.save(registroPayload);
+        const codigoRegistro = savedRes.data?.codigo_registro;
+
+        if (codigoRegistro) {
+          const ahora = new Date();
+          ahora.setHours(ahora.getHours() - 5);
+          const usuario = sessionStorage.getItem('usuario_codigo') || sessionStorage.getItem('usuario_nombre') || "No Definido";
+          const fechaMod = ahora.toISOString().split('.')[0] + ".000";
+
+          if (tipoMedicion === 'vibracion') {
+            const med = medicionesVibracion[i];
+            const orientaciones = getOrientacionesActivas(med);
+            for (const ori of orientaciones) {
+              for (const entrada of ori.entradas) {
+                const valorNum = parseValorDecimal(entrada.valor);
+                if (!isNaN(valorNum) && entrada.valor.trim() !== "") {
+                  await detallesService.save({
+                    codigo_detalle: 0,
+                    codigo_registro: Number(codigoRegistro),
+                    valor: valorNum,
+                    unidades: normalizarUnidad(entrada.unidades),
+                    orientacion: ori.nombre,
+                    fecha_medicion: fechaEvento || new Date().toISOString().slice(0, 16),
+                    estado: estado,
+                    fecha_modificacion: fechaMod,
+                    usuario_modificacion: usuario,
+                  });
+                }
+              }
+            }
+          } else {
+            const med = mediciones[i];
+            await detallesService.save({
+              codigo_detalle: 0,
+              codigo_registro: Number(codigoRegistro),
+              valor: parseValorDecimal(med.valor),
+              unidades: normalizarUnidad(med.unidades),
+              orientacion: "Radial",
+              fecha_medicion: fechaEvento || new Date().toISOString().slice(0, 16),
+              estado: estado,
+              fecha_modificacion: fechaMod,
+              usuario_modificacion: usuario,
+            });
+          }
+        }
       }
 
       toast({
@@ -623,6 +1070,8 @@ export function HandyRegClient() {
       setSelectedTarea(null);
       setSearchTerm("");
       setMediciones([{ id: "1", numero: 1, valor: "", unidades: "" }]);
+      setTipoMedicion(null);
+      setMedicionesVibracion([crearMedicionVibracion(1)]);
       setFechaEvento(new Date().toISOString().slice(0, 16));
       setFechaFinEvento("");
       setOt("");
@@ -709,7 +1158,7 @@ export function HandyRegClient() {
                             <div className="space-y-1">
                               {grupo.registros.map((reg, regIdx) => (
                                 <div key={regIdx} className="text-xs bg-blue-50 px-2 py-1 rounded">
-                                  {reg.valor} {reg.unidades}
+                                  {(reg as unknown as { valor?: string | number }).valor ?? "—"} {(reg as unknown as { unidades?: string }).unidades ?? ""}
                                 </div>
                               ))}
                             </div>
@@ -1127,87 +1576,306 @@ export function HandyRegClient() {
                 </Alert>
               )}
 
-              {/* Tabla de mediciones */}
-              <div className="space-y-3">
-                <Label className="text-base font-semibold">Mediciones</Label>
-                <div className="overflow-x-auto border rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-100">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-medium">Medición</th>
-                        <th className="px-4 py-3 text-left font-medium">Valor</th>
-                        <th className="px-4 py-3 text-left font-medium">Unidades</th>
-                        <th className="px-4 py-3 text-left font-medium">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {mediciones.map((medicion, idx) => (
-                        <tr key={medicion.id} className="border-t hover:bg-gray-50">
-                          <td className="px-4 py-3 text-center font-bold text-lg text-blue-600">
-                            {numeroALetra(medicion.numero)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Input
-                              type="number"
-                              step="0.01"
-                              placeholder="Requerido"
-                              value={medicion.valor}
-                              onChange={(e) =>
-                                handleMedicionChange(medicion.id, "valor", e.target.value)
-                              }
-                              className="w-full"
-                              disabled={saving || !trabajoIniciado}
-                              required
-                            />
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="space-y-1">
+              {/* ── Selector de tipo / Panel de mediciones ── */}
+              {!tipoMedicion ? (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-base font-semibold text-gray-800">¿Qué tipo de medición vas a registrar?</p>
+                    <p className="text-sm text-gray-500 mt-1">Selecciona el tipo antes de iniciar el trabajo</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setTipoMedicion('vibracion')}
+                      className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-gray-300 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group"
+                    >
+                      <div className="w-16 h-16 rounded-full bg-blue-100 group-hover:bg-blue-200 flex items-center justify-center transition-colors">
+                        <Activity className="h-8 w-8 text-blue-600" />
+                      </div>
+                      <div className="text-center">
+                        <p className="font-bold text-gray-900 text-lg">Vibración</p>
+                        <p className="text-xs text-gray-500 mt-1">mm/s RMS · g · Hz · in/s</p>
+                        <p className="text-xs text-gray-400 mt-2">Vertical · Horizontal · Axial</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTipoMedicion('temperatura')}
+                      className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-gray-300 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-all group"
+                    >
+                      <div className="w-16 h-16 rounded-full bg-orange-100 group-hover:bg-orange-200 flex items-center justify-center transition-colors">
+                        <Thermometer className="h-8 w-8 text-orange-500" />
+                      </div>
+                      <div className="text-center">
+                        <p className="font-bold text-gray-900 text-lg">Temperatura</p>
+                        <p className="text-xs text-gray-500 mt-1">°C · °F</p>
+                        <p className="text-xs text-gray-400 mt-2">Valor directo por medición</p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              ) : tipoMedicion === 'temperatura' ? (
+                /* ── Temperatura: tabla original ── */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Thermometer className="h-5 w-5 text-orange-500" />
+                      <Label className="text-base font-semibold">Mediciones de Temperatura</Label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { if (!trabajoIniciado) setTipoMedicion(null); }}
+                      disabled={trabajoIniciado}
+                      className="text-xs text-gray-400 hover:text-gray-600 underline disabled:no-underline disabled:cursor-not-allowed"
+                    >
+                      ← Cambiar tipo
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto border rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-medium">Medición</th>
+                          <th className="px-4 py-3 text-left font-medium">Valor</th>
+                          <th className="px-4 py-3 text-left font-medium">Unidades</th>
+                          <th className="px-4 py-3 text-left font-medium">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mediciones.map((medicion, idx) => (
+                          <tr key={medicion.id} className="border-t hover:bg-gray-50">
+                            <td className="px-4 py-3 text-center font-bold text-lg text-blue-600">
+                              {numeroALetra(medicion.numero)}
+                            </td>
+                            <td className="px-4 py-3">
                               <Input
                                 type="text"
-                                placeholder="Ej: C, F, mm/s, g..."
-                                value={medicion.unidades}
-                                onChange={(e) =>
-                                  handleMedicionChange(medicion.id, "unidades", e.target.value)
-                                }
+                                inputMode="decimal"
+                                placeholder="Requerido"
+                                value={medicion.valor}
+                                onChange={(e) => handleMedicionChange(medicion.id, "valor", e.target.value)}
                                 className="w-full"
                                 disabled={saving || !trabajoIniciado}
                                 required
                               />
-                              {medicion.unidades.trim() && (
-                                <p className="text-xs text-blue-600 font-medium">
-                                  → {normalizarUnidad(medicion.unidades)}
-                                </p>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="space-y-1">
+                                <Input
+                                  type="text"
+                                  placeholder="Ej: C, F..."
+                                  value={medicion.unidades}
+                                  onChange={(e) => handleMedicionChange(medicion.id, "unidades", e.target.value)}
+                                  className="w-full"
+                                  disabled={saving || !trabajoIniciado}
+                                  required
+                                />
+                                {medicion.unidades.trim() && (
+                                  <p className="text-xs text-blue-600 font-medium">→ {normalizarUnidad(medicion.unidades)}</p>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 flex items-center gap-2">
+                              {idx === mediciones.length - 1 ? (
+                                <Button
+                                  size="sm"
+                                  onClick={handleAddMedicion}
+                                  disabled={saving || !trabajoIniciado}
+                                  style={{ backgroundColor: "#0055b6" }}
+                                  className="text-white hover:opacity-90"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRemoveMedicion(medicion.id)}
+                                  disabled={mediciones.length === 1 || saving || !trabajoIniciado}
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-500" />
+                                </Button>
                               )}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 flex items-center gap-2">
-                            {idx === mediciones.length - 1 ? (
-                              <Button
-                                size="sm"
-                                onClick={handleAddMedicion}
-                                disabled={saving || !trabajoIniciado}
-                                style={{ backgroundColor: "#0055b6" }}
-                                className="text-white hover:opacity-90"
-                              >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleRemoveMedicion(medicion.id)}
-                                disabled={mediciones.length === 1 || saving || !trabajoIniciado}
-                              >
-                                <Trash2 className="h-4 w-4 text-red-500" />
-                              </Button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* ── Vibración: acordeón por medición ── */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Activity className="h-5 w-5 text-blue-600" />
+                      <Label className="text-base font-semibold">Mediciones de Vibración</Label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => { if (!trabajoIniciado) setTipoMedicion(null); }}
+                        disabled={trabajoIniciado}
+                        className="text-xs text-gray-400 hover:text-gray-600 underline disabled:no-underline disabled:cursor-not-allowed"
+                      >
+                        ← Cambiar tipo
+                      </button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleAddMedicionVibracion}
+                        disabled={saving || !trabajoIniciado}
+                      >
+                        <Plus className="h-4 w-4 mr-1" />
+                        Añadir Medición
+                      </Button>
+                    </div>
+                  </div>
+
+                  {medicionesVibracion.map((med) => (
+                    <div key={med.id} className="border rounded-xl overflow-hidden shadow-sm">
+                      {/* Cabecera del acordeón */}
+                      <div
+                        className="flex items-center justify-between px-4 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                        onClick={() => handleToggleExpand(med.id)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="font-bold text-2xl text-blue-600 w-8 text-center leading-none">
+                            {numeroALetra(med.numero)}
+                          </span>
+                          <div>
+                            <p className="font-semibold text-sm text-gray-800">
+                              Medición {numeroALetra(med.numero)}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {getEntradasActivas(med).filter((e) => e.valor.trim() !== "").length} valor(es) ingresado(s)
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {medicionesVibracion.length > 1 && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => { e.stopPropagation(); handleRemoveMedicionVibracion(med.id); }}
+                              disabled={saving || !trabajoIniciado}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          )}
+                          <ChevronRight
+                            className={`h-5 w-5 text-gray-400 transition-transform duration-200 ${med.expanded ? "rotate-90" : ""}`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Cuerpo expandible */}
+                      {med.expanded && (
+                        <div className="p-4 space-y-4 bg-white border-t">
+                          {/* Orientaciones: Vertical / Horizontal / Axial */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {(
+                              [
+                                { key: "vertical" as const, label: "Vertical", colorClass: "text-blue-700", borderClass: "border-blue-200 bg-blue-50" },
+                                { key: "horizontal" as const, label: "Horizontal", colorClass: "text-green-700", borderClass: "border-green-200 bg-green-50" },
+                                { key: "axial" as const, label: "Axial", colorClass: "text-purple-700", borderClass: "border-purple-200 bg-purple-50" },
+                              ] as const
+                            ).map(({ key, label, colorClass, borderClass }) => (
+                              <div key={key} className={`rounded-lg border p-3 space-y-2 ${borderClass}`}>
+                                <div className="flex items-center justify-between">
+                                  <p className={`text-sm font-bold ${colorClass}`}>{label}</p>
+                                  {med.activeOrientaciones[key] ? (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        requestRemoveEje(med.id, key, label);
+                                      }}
+                                      disabled={saving || !trabajoIniciado}
+                                      className="h-7 px-2 text-red-500 hover:text-red-600"
+                                      title={`Eliminar eje ${label} para esta medición`}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleRestoreEje(med.id, key)}
+                                      disabled={saving || !trabajoIniciado}
+                                      className="h-7 px-2 text-gray-500 hover:text-gray-700"
+                                      title={`Reactivar eje ${label}`}
+                                    >
+                                      <Plus className="h-3.5 w-3.5" />
+                                    </Button>
+                                  )}
+                                </div>
+
+                                {med.activeOrientaciones[key] ? (
+                                  <div className="space-y-2">
+                                    {med[key].map((entrada, entIdx) => (
+                                      <div key={entrada.id} className="space-y-1">
+                                        <div className="flex items-center gap-1.5">
+                                          <Input
+                                            type="text"
+                                            inputMode="decimal"
+                                            placeholder={`Valor ${entIdx + 1}`}
+                                            value={entrada.valor}
+                                            onChange={(e) => handleOrientacionChange(med.id, key, entrada.id, e.target.value)}
+                                            disabled={saving || !trabajoIniciado}
+                                            className="flex-1 bg-white min-w-0"
+                                          />
+                                          <Input
+                                            type="text"
+                                            placeholder="Unidad"
+                                            value={entrada.unidades}
+                                            onChange={(e) => handleOrientacionUnidades(med.id, key, entrada.id, e.target.value)}
+                                            disabled={saving || !trabajoIniciado}
+                                            className="w-20 bg-white"
+                                          />
+                                          {med[key].length > 1 && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => handleRemoveOrientacionEntry(med.id, key, entrada.id)}
+                                              disabled={saving || !trabajoIniciado}
+                                              className="px-2 h-8"
+                                            >
+                                              <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                                            </Button>
+                                          )}
+                                        </div>
+                                        {entrada.unidades.trim() && (
+                                          <p className="text-xs text-gray-400 pl-0.5">→ {normalizarUnidad(entrada.unidades)}</p>
+                                        )}
+                                      </div>
+                                    ))}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleAddOrientacionEntry(med.id, key)}
+                                      disabled={saving || !trabajoIniciado}
+                                      className={`w-full text-xs h-8 ${colorClass} hover:bg-white/60`}
+                                    >
+                                      <Plus className="h-3 w-3 mr-1" />
+                                      Añadir valor
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="rounded-md border border-dashed border-gray-300 bg-white/60 p-3 text-xs text-gray-500">
+                                    Eje omitido para esta medición. Pulsa + para reactivarlo.
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Campos de Control */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1302,7 +1970,7 @@ export function HandyRegClient() {
                           const [compKey] = val.split('__'); // Extrae la parte antes de __
                           const tareaSeleccionada = tareasFiltradas.find(t => getTareaKey(t) === compKey);
                           if (tareaSeleccionada) {
-                            setOt(tareaSeleccionada.OT_ULT.toString());
+                            setOt(getOtProgramada(tareaSeleccionada));
                           }
                         }}
                       >
@@ -1322,7 +1990,7 @@ export function HandyRegClient() {
                                 }`}
                                 onClick={() => {
                                   setSelectedTarea(uniqueKey);
-                                  setOt(tarea.OT_ULT.toString());
+                                  setOt(getOtProgramada(tarea));
                                 }}
                               >
                                 <div className="flex gap-3">
@@ -1344,6 +2012,8 @@ export function HandyRegClient() {
                                         </div>
                                         <div>
                                           <p className="text-gray-600">Técnico: {tarea.TECNICO || "No asignado"}</p>
+                                          <p className="text-gray-600">OT ULT: {tarea.OT_ULT ?? "No asignada"}</p>
+                                          <p className="text-gray-600">OT PRG: {getOtProgramada(tarea) || "No asignada"}</p>
                                           <p className="text-gray-600">Tiempo est.: {tarea.TIEMPO} min</p>
                                         </div>
                                       </div>
@@ -1461,27 +2131,45 @@ export function HandyRegClient() {
 
                 <div className="space-y-2">
                   <p className="font-semibold text-gray-700">Mediciones a Crear:</p>
-                  {registrosToConfirm.map((registro, idx) => (
-                    <div key={idx} className="border rounded p-3 bg-blue-50">
-                      <div className="grid grid-cols-3 gap-2 text-sm">
-                        <div>
-                          <p className="text-gray-600">Medición #{registro.medicion}</p>
-                        </div>
-                        <div>
-                          <p className="font-semibold">{registro.valor} {registro.unidades}</p>
-                        </div>
-                        <div className="text-right">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${
-                            registro.estado === "A"
-                              ? "bg-green-100 text-green-700"
-                              : "bg-gray-100 text-gray-700"
-                          }`}>
-                            {registro.estado === "A" ? "Activo" : "Inactivo"}
+                  {tipoMedicion === 'vibracion' ? (
+                    medicionesVibracion.map((med, idx) => (
+                      <div key={idx} className="border rounded p-3 bg-blue-50">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-semibold text-blue-800">
+                            Medición {numeroALetra(med.numero)}
+                          </p>
+                          <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">
+                            {getEntradasActivas(med).filter((e) => e.valor.trim()).length} valor(es)
                           </span>
                         </div>
+                        <div className="grid grid-cols-3 gap-2 text-xs text-gray-600">
+                          <div><span className="font-medium text-blue-700">V:</span> {med.activeOrientaciones.vertical ? (med.vertical.filter((e) => e.valor.trim()).map((e) => `${e.valor}${e.unidades ? ` ${normalizarUnidad(e.unidades)}` : ""}`).join(", ") || "—") : "omitido"}</div>
+                          <div><span className="font-medium text-green-700">H:</span> {med.activeOrientaciones.horizontal ? (med.horizontal.filter((e) => e.valor.trim()).map((e) => `${e.valor}${e.unidades ? ` ${normalizarUnidad(e.unidades)}` : ""}`).join(", ") || "—") : "omitido"}</div>
+                          <div><span className="font-medium text-purple-700">A:</span> {med.activeOrientaciones.axial ? (med.axial.filter((e) => e.valor.trim()).map((e) => `${e.valor}${e.unidades ? ` ${normalizarUnidad(e.unidades)}` : ""}`).join(", ") || "—") : "omitido"}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    registrosToConfirm.map((registro, idx) => (
+                      <div key={idx} className="border rounded p-3 bg-blue-50">
+                        <div className="grid grid-cols-3 gap-2 text-sm">
+                          <div>
+                            <p className="text-gray-600">Medición #{registro.medicion}</p>
+                          </div>
+                          <div>
+                            <p className="font-semibold">{(registro as any).valor} {(registro as any).unidades}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              registro.estado === "A" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
+                            }`}>
+                              {registro.estado === "A" ? "Activo" : "Inactivo"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -1509,6 +2197,52 @@ export function HandyRegClient() {
                       Confirmar y Guardar
                     </>
                   )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={showDeleteEjeModal}
+            onOpenChange={(open) => {
+              setShowDeleteEjeModal(open);
+              if (!open) setDeleteEjeTarget(null);
+            }}
+          >
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-red-600">
+                  <AlertTriangle className="h-5 w-5" />
+                  Confirmar eliminación de eje
+                </DialogTitle>
+                <DialogDescription>
+                  {deleteEjeTarget
+                    ? `Vas a omitir el eje ${deleteEjeTarget.label} para esta medición. Este eje no se considerará en la validación ni en el guardado del registro.`
+                    : "Confirma si deseas omitir este eje para el registro actual."}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Si luego necesitas este eje, podrás reactivarlo con el botón + del módulo.
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowDeleteEjeModal(false);
+                    setDeleteEjeTarget(null);
+                  }}
+                  disabled={saving}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={confirmRemoveEje}
+                  disabled={saving}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  Sí, omitir eje
                 </Button>
               </DialogFooter>
             </DialogContent>
