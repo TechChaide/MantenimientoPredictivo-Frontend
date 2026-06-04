@@ -299,24 +299,31 @@ export function HandyRegClient() {
           }
         }
 
-        // Cargar detalles para cada registro
-        const registrosConDetalles = await Promise.all(
-          allRegistros.map(async (registro) => {
-            try {
-              const detallesRes = await detallesService.getByRegistro(registro.codigo_registro);
-              return {
-                ...registro,
-                detalles: detallesRes.data || [],
-              };
-            } catch (err) {
-              console.warn(`Error cargando detalles para registro ${registro.codigo_registro}:`, err);
-              return {
-                ...registro,
-                detalles: [],
-              };
-            }
-          })
-        );
+        // Cargar TODOS los detalles una sola vez
+        let allDetalles: Detalles[] = [];
+        try {
+          const detallesRes = await detallesService.getAll(1, 100000);
+          allDetalles = detallesRes.data || [];
+        } catch (err) {
+          console.error("Error cargando detalles:", err);
+          allDetalles = [];
+        }
+
+        // Crear un mapa de detalles por codigo_registro para búsqueda rápida
+        const detallesPorRegistro: { [key: string]: Detalles[] } = {};
+        allDetalles.forEach((detalle) => {
+          const codigoReg = String(detalle.codigo_registro);
+          if (!detallesPorRegistro[codigoReg]) {
+            detallesPorRegistro[codigoReg] = [];
+          }
+          detallesPorRegistro[codigoReg].push(detalle);
+        });
+
+        // Asociar detalles a cada registro
+        const registrosConDetalles = allRegistros.map((registro) => ({
+          ...registro,
+          detalles: detallesPorRegistro[String(registro.codigo_registro)] || [],
+        }));
 
         setRegistrosHistorico(registrosConDetalles);
       } catch (err) {
@@ -330,17 +337,24 @@ export function HandyRegClient() {
     loadData();
   }, [toast]);
 
-  // Función para obtener registros agrupados y paginados
+  // Función para obtener registros paginados (uno por fila)
   const obtenerRegistrosPaginados = () => {
-    const todosLosGrupos = obtenerRegistrosAgrupados();
-    const totalPages = Math.ceil(todosLosGrupos.length / itemsPerPage);
+    // Ordenar registros por fecha de evento (descendente)
+    const registrosOrdenados = [...registrosHistorico].sort((a, b) => {
+      const fechaA = new Date(a.fecha_evento || a.fecha_creacion).getTime();
+      const fechaB = new Date(b.fecha_evento || b.fecha_creacion).getTime();
+      return fechaB - fechaA;
+    });
+
+    const totalRegistros = registrosOrdenados.length;
+    const totalPages = Math.ceil(totalRegistros / itemsPerPage);
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
-    const gruposPaginados = todosLosGrupos.slice(startIndex, endIndex);
+    const registrosPaginados = registrosOrdenados.slice(startIndex, endIndex);
     
     return {
-      grupos: gruposPaginados,
-      totalGrupos: todosLosGrupos.length,
+      registros: registrosPaginados,
+      totalRegistros,
       totalPages,
       currentPage,
     };
@@ -1154,7 +1168,7 @@ export function HandyRegClient() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Historial de Registros</CardTitle>
-                <p className="text-sm text-gray-600 mt-2">Total: {registrosHistorico.length} registro(s) | Agrupado por OT: {obtenerRegistrosAgrupados().length} grupo(s)</p>
+                <p className="text-sm text-gray-600 mt-2">Total: {registrosHistorico.length} registro(s)</p>
               </div>
               <Button onClick={() => setShowFormulario(true)} className="bg-blue-600 hover:bg-blue-700">
                 <Plus className="mr-2 h-4 w-4" />
@@ -1167,9 +1181,11 @@ export function HandyRegClient() {
                   <thead className="bg-gray-100">
                     <tr>
                       <th className="px-4 py-3 text-left font-medium">OT</th>
+                      <th className="px-4 py-3 text-left font-medium">Código Registro</th>
                       <th className="px-4 py-3 text-left font-medium">Equipo</th>
                       <th className="px-4 py-3 text-left font-medium">Componente</th>
                       <th className="px-4 py-3 text-left font-medium">Medición</th>
+                      <th className="px-4 py-3 text-left font-medium">Código Detalle</th>
                       <th className="px-4 py-3 text-left font-medium">Valores Registrados</th>
                       <th className="px-4 py-3 text-left font-medium">Fecha Inicio</th>
                       <th className="px-4 py-3 text-left font-medium">Fecha Fin</th>
@@ -1178,108 +1194,95 @@ export function HandyRegClient() {
                     </tr>
                   </thead>
                   <tbody>
-                    {obtenerRegistrosPaginados().grupos.map((grupo, idx) => {
+                    {obtenerRegistrosPaginados().registros.map((registro, idx) => {
                       // Obtener datos del componente
-                      const componente = componentes.find(c => c.codigo_componente === grupo.primerRegistro.codigo_componente);
+                      const componente = componentes.find(c => c.codigo_componente === registro.codigo_componente);
                       // Obtener datos del equipo a través del componente
                       const equipo = equipos.find(e => e.codigo_equipo === componente?.codigo_equipo);
                       
-                      // Agrupar detalles por número de medición
-                      const detallesPorMedicion: { [key: number]: Detalles[] } = {};
-                      grupo.registros.forEach((reg) => {
-                        (reg.detalles || []).forEach((detalle) => {
-                          const medicionNum = reg.medicion || 1;
-                          if (!detallesPorMedicion[medicionNum]) {
-                            detallesPorMedicion[medicionNum] = [];
-                          }
-                          detallesPorMedicion[medicionNum].push(detalle);
-                        });
-                      });
-                      
-                      const mediacionesOrdenadas = Object.keys(detallesPorMedicion)
-                        .map(Number)
-                        .sort((a, b) => a - b);
+                      // Detalles de este registro - validar que pertenecen al registro correcto
+                      const detalles = (registro.detalles || []).filter(
+                        detalle => String(detalle.codigo_registro).trim() === String(registro.codigo_registro).trim()
+                      );
                       
                       return (
                         <tr key={idx} className="border-t hover:bg-gray-50">
-                          <td className="px-4 py-3 font-semibold text-blue-600" valign="middle">{grupo.ot}</td>
+                          <td className="px-4 py-3 font-semibold text-blue-600" valign="middle">{registro.OT}</td>
+                          <td className="px-4 py-3 font-mono text-xs bg-gray-50" valign="middle">{registro.codigo_registro}</td>
                           <td className="px-4 py-3" valign="middle">{equipo?.nombre_equipo || "N/A"}</td>
-                          <td className="px-4 py-3" valign="middle">{componente?.nombre_componente || grupo.primerRegistro.codigo_componente}</td>
+                          <td className="px-4 py-3" valign="middle">{componente?.nombre_componente || registro.codigo_componente}</td>
                           <td className="px-4 py-3" valign="middle">
-                            <div className="space-y-2">
-                              {mediacionesOrdenadas.length > 0 ? (
-                                mediacionesOrdenadas.map((medicionNum) => {
-                                  const detalles = detallesPorMedicion[medicionNum];
-                                  const letraMedicion = numeroALetra(medicionNum);
-                                  const tiposDetalle = [...new Set(detalles.map(d => getTipoMedicion(d)))];
-                                  const esTemperatura = tiposDetalle.includes('temperatura');
-                                  const esVibracion = tiposDetalle.includes('vibracion');
-                                  
-                                  let tipoLabel = '';
-                                  if (esTemperatura && esVibracion) {
-                                    tipoLabel = 'Temp+Vibr';
-                                  } else if (esTemperatura) {
-                                    tipoLabel = 'Temperatura';
-                                  } else if (esVibracion) {
-                                    tipoLabel = 'Vibración';
-                                  } else {
-                                    tipoLabel = 'Otros';
-                                  }
-                                  
-                                  return (
-                                    <div key={medicionNum} className="bg-gray-50 p-2 rounded border border-gray-200">
-                                      <div className="font-semibold text-blue-600 mb-1">
-                                        {letraMedicion} - {tipoLabel}
-                                      </div>
-                                    </div>
-                                  );
-                                })
+                            <div className="bg-gray-50 p-2 rounded border border-gray-200">
+                              <div className="font-semibold text-blue-600">
+                                {numeroALetra(registro.medicion)} - {detalles.length > 0 ? (
+                                  getTipoMedicion(detalles[0]) === 'temperatura' ? 'Temperatura' : 
+                                  getTipoMedicion(detalles[0]) === 'vibracion' ? 'Vibración' : 'Otros'
+                                ) : 'N/A'}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3" valign="middle">
+                            <div className="space-y-1">
+                              {detalles.length > 0 ? (
+                                detalles.map((detalle, detIdx) => (
+                                  <div key={detIdx} className="text-xs font-mono bg-yellow-50 px-2 py-1 rounded border border-yellow-200">
+                                    {detalle.codigo_detalle}
+                                  </div>
+                                ))
                               ) : (
-                                <div className="text-gray-500">—</div>
+                                <div className="text-gray-500 text-xs">—</div>
                               )}
                             </div>
                           </td>
                           <td className="px-4 py-3" valign="middle">
-                            <div className="space-y-2">
-                              {mediacionesOrdenadas.length > 0 ? (
-                                mediacionesOrdenadas.map((medicionNum) => {
-                                  const detalles = detallesPorMedicion[medicionNum];
-                                  return (
-                                    <div key={medicionNum} className="space-y-1">
-                                      {detalles.map((detalle, detIdx) => (
-                                        <div key={detIdx} className="text-xs bg-blue-50 px-2 py-1 rounded">
-                                          {detalle.valor} {detalle.unidades}
-                                          {detalle.orientacion && (
-                                            <span className="text-gray-500 ml-1">({detalle.orientacion})</span>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  );
-                                })
+                            <div className="space-y-1">
+                              {detalles.length > 0 ? (
+                                detalles.map((detalle, detIdx) => (
+                                  <div key={detIdx} className="text-xs bg-blue-50 px-2 py-1 rounded">
+                                    {detalle.valor} {detalle.unidades}
+                                    {detalle.orientacion && (
+                                      <span className="text-gray-500 ml-1">({detalle.orientacion})</span>
+                                    )}
+                                  </div>
+                                ))
                               ) : (
-                                <div className="text-gray-500">—</div>
+                                <div className="text-gray-500 text-xs">—</div>
                               )}
                             </div>
                           </td>
                           <td className="px-4 py-3 text-xs" valign="middle">
-                            {typeof grupo.primerRegistro.fecha_evento === 'string' 
-                              ? new Date(grupo.primerRegistro.fecha_evento).toLocaleString() 
-                              : new Date(grupo.primerRegistro.fecha_evento).toLocaleString()}
+                            {registro.fecha_evento 
+                              ? (typeof registro.fecha_evento === 'string' 
+                                  ? new Date(registro.fecha_evento).toLocaleString() 
+                                  : (registro.fecha_evento instanceof Date 
+                                      ? registro.fecha_evento.toLocaleString()
+                                      : "—"))
+                              : "—"}
                           </td>
                           <td className="px-4 py-3 text-xs" valign="middle">
-                            {typeof grupo.primerRegistro.fecha_creacion === 'string' 
-                              ? new Date(grupo.primerRegistro.fecha_creacion).toLocaleString() 
-                              : new Date(grupo.primerRegistro.fecha_creacion).toLocaleString()}
+                            {registro.fecha_creacion 
+                              ? (typeof registro.fecha_creacion === 'string' 
+                                  ? new Date(registro.fecha_creacion).toLocaleString() 
+                                  : (registro.fecha_creacion instanceof Date 
+                                      ? registro.fecha_creacion.toLocaleString()
+                                      : "—"))
+                              : "—"}
                           </td>
-                          <td className="px-4 py-3 font-medium text-green-600" valign="middle">{grupo.tiempoUtilizado}</td>
+                          <td className="px-4 py-3 font-medium text-green-600" valign="middle">
+                            {(() => {
+                              const totalSegundos = registro.tiempo_utilizado;
+                              const horas = Math.floor(totalSegundos / 3600);
+                              const minutos = Math.floor((totalSegundos % 3600) / 60);
+                              return `${horas}h ${minutos}m`;
+                            })()}
+                          </td>
                           <td className="px-4 py-3" valign="middle">
                             <span className={`px-2 py-1 rounded text-xs font-medium ${
-                              grupo.primerRegistro.estado === "A"
+                              registro.estado === "A"
                                 ? "bg-green-100 text-green-700"
                                 : "bg-gray-100 text-gray-700"
                             }`}>
-                              {grupo.primerRegistro.estado === "A" ? "Activo" : "Inactivo"}
+                              {registro.estado === "A" ? "Activo" : "Inactivo"}
                             </span>
                           </td>
                         </tr>
@@ -1310,7 +1313,7 @@ export function HandyRegClient() {
                 </div>
 
                 <div className="text-sm text-gray-600">
-                  {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, obtenerRegistrosPaginados().totalGrupos)} of {obtenerRegistrosPaginados().totalGrupos}
+                  {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, obtenerRegistrosPaginados().totalRegistros)} of {obtenerRegistrosPaginados().totalRegistros}
                 </div>
 
                 <div className="flex items-center gap-2">

@@ -373,8 +373,8 @@ export interface Registros {
 }
 
 export interface Detalles {
-  codigo_detalle: number;
-  codigo_registro: number;
+  codigo_detalle: number | string;
+  codigo_registro: number | string;
   valor: number;
   unidades: string;
   orientacion: string;

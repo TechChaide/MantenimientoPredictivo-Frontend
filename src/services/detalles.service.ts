@@ -52,6 +52,17 @@ export const detallesService = {
   },
 
   async getByRegistro(codigoRegistro: string | number): Promise<BodyListResponse<Detalles>> {
+    // Intentar primero con endpoint específico
+    try {
+      const response = await fetch(`${API_URL}/registro/${codigoRegistro}`);
+      if (response.ok) {
+        return response.json();
+      }
+    } catch (err) {
+      console.warn(`Endpoint específico /registro/:id no disponible, intentando con query params`);
+    }
+
+    // Si falla, intentar con query parameter
     const params = new URLSearchParams();
     params.append('codigo_registro', codigoRegistro.toString());
 
@@ -60,6 +71,16 @@ export const detallesService = {
       const errorBody = await response.json().catch(() => ({ message: 'Error desconocido' }));
       throw new Error(errorBody.message || `Failed to fetch detalles for registro ${codigoRegistro}`);
     }
-    return response.json();
+    
+    const result = await response.json();
+    
+    // Filtrar en el cliente para asegurar que solo traemos detalles del registro correcto
+    if (result.data && Array.isArray(result.data)) {
+      result.data = result.data.filter((detalle: Detalles) => 
+        detalle.codigo_registro === Number(codigoRegistro)
+      );
+    }
+    
+    return result;
   },
 };
