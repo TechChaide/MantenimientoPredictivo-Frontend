@@ -50,4 +50,16 @@ export const detallesService = {
       throw new Error(errorBody.message || `Failed to delete detalle with id ${id}`);
     }
   },
+
+  async getByRegistro(codigoRegistro: string | number): Promise<BodyListResponse<Detalles>> {
+    const params = new URLSearchParams();
+    params.append('codigo_registro', codigoRegistro.toString());
+
+    const response = await fetch(`${API_URL}?${params.toString()}`);
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido' }));
+      throw new Error(errorBody.message || `Failed to fetch detalles for registro ${codigoRegistro}`);
+    }
+    return response.json();
+  },
 };

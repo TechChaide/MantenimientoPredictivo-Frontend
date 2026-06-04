@@ -33,6 +33,28 @@ const numeroALetra = (numero: number): string => {
   return String.fromCharCode(64 + numero); // 64 + 1 = 65 (A)
 };
 
+// Función para determinar si es temperatura o vibración
+const esMedicionTemperatura = (unidades: string): boolean => {
+  const unitasLower = String(unidades).toLowerCase();
+  return /°c|°f|celsius|fahrenheit|c|f/.test(unitasLower);
+};
+
+const esMedicionVibracion = (orientacion: string, unidades: string): boolean => {
+  return (
+    orientacion && 
+    (orientacion.toLowerCase().includes('vertical') || 
+     orientacion.toLowerCase().includes('horizontal') || 
+     orientacion.toLowerCase().includes('axial'))
+  ) || /mm|in|g|hz|rms|vibra|acele/.test(String(unidades).toLowerCase());
+};
+
+// Función para obtener el tipo de medición basado en unidades y orientación
+const getTipoMedicion = (detalle: Detalles): 'temperatura' | 'vibracion' | 'otro' => {
+  if (esMedicionTemperatura(detalle.unidades)) return 'temperatura';
+  if (esMedicionVibracion(detalle.orientacion, detalle.unidades)) return 'vibracion';
+  return 'otro';
+};
+
 /**
  * Normaliza el texto libre que ingresa el técnico a la unidad estándar.
  * Temperatura → °C o °F  |  Vibración → mm/s RMS, in/s RMS, mm pk-pk, in pk-pk, g RMS, Hz
@@ -211,23 +233,14 @@ export function HandyRegClient() {
     return Object.entries(agrupados).map(([ot, registros]) => {
       const primerRegistro = registros[0];
       
-      // Calcular tiempo utilizado
+      // Calcular tiempo utilizado a partir del campo tiempo_utilizado (en segundos)
       let tiempoUtilizado = "N/A";
-      if (primerRegistro.fecha_inicio_evento && primerRegistro.fecha_fin_evento) {
-        const inicio = new Date(typeof primerRegistro.fecha_inicio_evento === 'string' 
-          ? primerRegistro.fecha_inicio_evento 
-          : primerRegistro.fecha_inicio_evento);
-        const fin = new Date(typeof primerRegistro.fecha_fin_evento === 'string' 
-          ? primerRegistro.fecha_fin_evento 
-          : primerRegistro.fecha_fin_evento);
+      if (primerRegistro.tiempo_utilizado) {
+        const totalSegundos = primerRegistro.tiempo_utilizado;
+        const horas = Math.floor(totalSegundos / 3600);
+        const minutos = Math.floor((totalSegundos % 3600) / 60);
         
-        const diferenciaMilisegundos = fin.getTime() - inicio.getTime();
-        const segundos = Math.floor(diferenciaMilisegundos / 1000);
-        const minutos = Math.floor(segundos / 60);
-        const horas = Math.floor(minutos / 60);
-        const minutosRestantes = minutos % 60;
-        
-        tiempoUtilizado = `${horas}h ${minutosRestantes}m`;
+        tiempoUtilizado = `${horas}h ${minutos}m`;
       }
       
       return {
@@ -286,7 +299,26 @@ export function HandyRegClient() {
           }
         }
 
-        setRegistrosHistorico(allRegistros);
+        // Cargar detalles para cada registro
+        const registrosConDetalles = await Promise.all(
+          allRegistros.map(async (registro) => {
+            try {
+              const detallesRes = await detallesService.getByRegistro(registro.codigo_registro);
+              return {
+                ...registro,
+                detalles: detallesRes.data || [],
+              };
+            } catch (err) {
+              console.warn(`Error cargando detalles para registro ${registro.codigo_registro}:`, err);
+              return {
+                ...registro,
+                detalles: [],
+              };
+            }
+          })
+        );
+
+        setRegistrosHistorico(registrosConDetalles);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Error al cargar datos";
         setError(msg);
@@ -1137,7 +1169,8 @@ export function HandyRegClient() {
                       <th className="px-4 py-3 text-left font-medium">OT</th>
                       <th className="px-4 py-3 text-left font-medium">Equipo</th>
                       <th className="px-4 py-3 text-left font-medium">Componente</th>
-                      <th className="px-4 py-3 text-left font-medium">Mediciones</th>
+                      <th className="px-4 py-3 text-left font-medium">Medición</th>
+                      <th className="px-4 py-3 text-left font-medium">Valores Registrados</th>
                       <th className="px-4 py-3 text-left font-medium">Fecha Inicio</th>
                       <th className="px-4 py-3 text-left font-medium">Fecha Fin</th>
                       <th className="px-4 py-3 text-left font-medium">Tiempo Utilizado</th>
@@ -1151,24 +1184,96 @@ export function HandyRegClient() {
                       // Obtener datos del equipo a través del componente
                       const equipo = equipos.find(e => e.codigo_equipo === componente?.codigo_equipo);
                       
+                      // Agrupar detalles por número de medición
+                      const detallesPorMedicion: { [key: number]: Detalles[] } = {};
+                      grupo.registros.forEach((reg) => {
+                        (reg.detalles || []).forEach((detalle) => {
+                          const medicionNum = reg.medicion || 1;
+                          if (!detallesPorMedicion[medicionNum]) {
+                            detallesPorMedicion[medicionNum] = [];
+                          }
+                          detallesPorMedicion[medicionNum].push(detalle);
+                        });
+                      });
+                      
+                      const mediacionesOrdenadas = Object.keys(detallesPorMedicion)
+                        .map(Number)
+                        .sort((a, b) => a - b);
+                      
                       return (
                         <tr key={idx} className="border-t hover:bg-gray-50">
-                          <td className="px-4 py-3 font-semibold text-blue-600">{grupo.ot}</td>
-                          <td className="px-4 py-3">{equipo?.nombre_equipo || "N/A"}</td>
-                          <td className="px-4 py-3">{componente?.nombre_componente || grupo.primerRegistro.codigo_componente}</td>
-                          <td className="px-4 py-3">
-                            <div className="space-y-1">
-                              {grupo.registros.map((reg, regIdx) => (
-                                <div key={regIdx} className="text-xs bg-blue-50 px-2 py-1 rounded">
-                                  {(reg as unknown as { valor?: string | number }).valor ?? "—"} {(reg as unknown as { unidades?: string }).unidades ?? ""}
-                                </div>
-                              ))}
+                          <td className="px-4 py-3 font-semibold text-blue-600" valign="middle">{grupo.ot}</td>
+                          <td className="px-4 py-3" valign="middle">{equipo?.nombre_equipo || "N/A"}</td>
+                          <td className="px-4 py-3" valign="middle">{componente?.nombre_componente || grupo.primerRegistro.codigo_componente}</td>
+                          <td className="px-4 py-3" valign="middle">
+                            <div className="space-y-2">
+                              {mediacionesOrdenadas.length > 0 ? (
+                                mediacionesOrdenadas.map((medicionNum) => {
+                                  const detalles = detallesPorMedicion[medicionNum];
+                                  const letraMedicion = numeroALetra(medicionNum);
+                                  const tiposDetalle = [...new Set(detalles.map(d => getTipoMedicion(d)))];
+                                  const esTemperatura = tiposDetalle.includes('temperatura');
+                                  const esVibracion = tiposDetalle.includes('vibracion');
+                                  
+                                  let tipoLabel = '';
+                                  if (esTemperatura && esVibracion) {
+                                    tipoLabel = 'Temp+Vibr';
+                                  } else if (esTemperatura) {
+                                    tipoLabel = 'Temperatura';
+                                  } else if (esVibracion) {
+                                    tipoLabel = 'Vibración';
+                                  } else {
+                                    tipoLabel = 'Otros';
+                                  }
+                                  
+                                  return (
+                                    <div key={medicionNum} className="bg-gray-50 p-2 rounded border border-gray-200">
+                                      <div className="font-semibold text-blue-600 mb-1">
+                                        {letraMedicion} - {tipoLabel}
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <div className="text-gray-500">—</div>
+                              )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-xs">{typeof grupo.primerRegistro.fecha_inicio_evento === 'string' ? grupo.primerRegistro.fecha_inicio_evento : new Date(grupo.primerRegistro.fecha_inicio_evento).toLocaleString()}</td>
-                          <td className="px-4 py-3 text-xs">{typeof grupo.primerRegistro.fecha_fin_evento === 'string' ? grupo.primerRegistro.fecha_fin_evento : new Date(grupo.primerRegistro.fecha_fin_evento).toLocaleString()}</td>
-                          <td className="px-4 py-3 font-medium text-green-600">{grupo.tiempoUtilizado}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3" valign="middle">
+                            <div className="space-y-2">
+                              {mediacionesOrdenadas.length > 0 ? (
+                                mediacionesOrdenadas.map((medicionNum) => {
+                                  const detalles = detallesPorMedicion[medicionNum];
+                                  return (
+                                    <div key={medicionNum} className="space-y-1">
+                                      {detalles.map((detalle, detIdx) => (
+                                        <div key={detIdx} className="text-xs bg-blue-50 px-2 py-1 rounded">
+                                          {detalle.valor} {detalle.unidades}
+                                          {detalle.orientacion && (
+                                            <span className="text-gray-500 ml-1">({detalle.orientacion})</span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <div className="text-gray-500">—</div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-xs" valign="middle">
+                            {typeof grupo.primerRegistro.fecha_evento === 'string' 
+                              ? new Date(grupo.primerRegistro.fecha_evento).toLocaleString() 
+                              : new Date(grupo.primerRegistro.fecha_evento).toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-xs" valign="middle">
+                            {typeof grupo.primerRegistro.fecha_creacion === 'string' 
+                              ? new Date(grupo.primerRegistro.fecha_creacion).toLocaleString() 
+                              : new Date(grupo.primerRegistro.fecha_creacion).toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 font-medium text-green-600" valign="middle">{grupo.tiempoUtilizado}</td>
+                          <td className="px-4 py-3" valign="middle">
                             <span className={`px-2 py-1 rounded text-xs font-medium ${
                               grupo.primerRegistro.estado === "A"
                                 ? "bg-green-100 text-green-700"
