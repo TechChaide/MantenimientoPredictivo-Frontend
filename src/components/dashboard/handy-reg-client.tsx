@@ -367,9 +367,10 @@ export function HandyRegClient() {
       try {
         setLoadingTareas(true);
         
-        // Calcular fechas: hoy y hoy + 2 días
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
+        // Calcular fechas: hace 2 días, hoy y hoy + 2 días
+        const fechaInicio = new Date();
+        fechaInicio.setDate(fechaInicio.getDate() - 2);
+        fechaInicio.setHours(0, 0, 0, 0);
         
         const fechaFin = new Date();
         fechaFin.setDate(fechaFin.getDate() + 2);
@@ -377,7 +378,7 @@ export function HandyRegClient() {
 
         const resultado = await serviciosService.getTareasSismacProgramadasPorAreaEIntervaloFechas(
           areaSeleccionada.nombre_area,
-          hoy,
+          fechaInicio,
           fechaFin
         );
 
@@ -404,7 +405,8 @@ export function HandyRegClient() {
       tarea.MAQUINA.toLowerCase().includes(searchLower) ||
       tarea.COMPONENTE.toLowerCase().includes(searchLower) ||
       tarea.TIPO_MTO.toLowerCase().includes(searchLower) ||
-      (tarea.TECNICO && tarea.TECNICO.toLowerCase().includes(searchLower))
+      (tarea.TECNICO && tarea.TECNICO.toLowerCase().includes(searchLower)) ||
+      String(tarea.OT_PRG).includes(searchLower)
     );
   });
 
