@@ -33,6 +33,28 @@ const numeroALetra = (numero: number): string => {
   return String.fromCharCode(64 + numero); // 64 + 1 = 65 (A)
 };
 
+// Función para determinar si es temperatura o vibración
+const esMedicionTemperatura = (unidades: string): boolean => {
+  const unitasLower = String(unidades).toLowerCase();
+  return /°c|°f|celsius|fahrenheit|c|f/.test(unitasLower);
+};
+
+const esMedicionVibracion = (orientacion: string, unidades: string): boolean => {
+  return (
+    orientacion && 
+    (orientacion.toLowerCase().includes('vertical') || 
+     orientacion.toLowerCase().includes('horizontal') || 
+     orientacion.toLowerCase().includes('axial'))
+  ) || /mm|in|g|hz|rms|vibra|acele/.test(String(unidades).toLowerCase());
+};
+
+// Función para obtener el tipo de medición basado en unidades y orientación
+const getTipoMedicion = (detalle: Detalles): 'temperatura' | 'vibracion' | 'otro' => {
+  if (esMedicionTemperatura(detalle.unidades)) return 'temperatura';
+  if (esMedicionVibracion(detalle.orientacion, detalle.unidades)) return 'vibracion';
+  return 'otro';
+};
+
 /**
  * Normaliza el texto libre que ingresa el técnico a la unidad estándar.
  * Temperatura → °C o °F  |  Vibración → mm/s RMS, in/s RMS, mm pk-pk, in pk-pk, g RMS, Hz
@@ -211,23 +233,14 @@ export function HandyRegClient() {
     return Object.entries(agrupados).map(([ot, registros]) => {
       const primerRegistro = registros[0];
       
-      // Calcular tiempo utilizado
+      // Calcular tiempo utilizado a partir del campo tiempo_utilizado (en segundos)
       let tiempoUtilizado = "N/A";
-      if (primerRegistro.fecha_inicio_evento && primerRegistro.fecha_fin_evento) {
-        const inicio = new Date(typeof primerRegistro.fecha_inicio_evento === 'string' 
-          ? primerRegistro.fecha_inicio_evento 
-          : primerRegistro.fecha_inicio_evento);
-        const fin = new Date(typeof primerRegistro.fecha_fin_evento === 'string' 
-          ? primerRegistro.fecha_fin_evento 
-          : primerRegistro.fecha_fin_evento);
+      if (primerRegistro.tiempo_utilizado) {
+        const totalSegundos = primerRegistro.tiempo_utilizado;
+        const horas = Math.floor(totalSegundos / 3600);
+        const minutos = Math.floor((totalSegundos % 3600) / 60);
         
-        const diferenciaMilisegundos = fin.getTime() - inicio.getTime();
-        const segundos = Math.floor(diferenciaMilisegundos / 1000);
-        const minutos = Math.floor(segundos / 60);
-        const horas = Math.floor(minutos / 60);
-        const minutosRestantes = minutos % 60;
-        
-        tiempoUtilizado = `${horas}h ${minutosRestantes}m`;
+        tiempoUtilizado = `${horas}h ${minutos}m`;
       }
       
       return {
@@ -286,7 +299,33 @@ export function HandyRegClient() {
           }
         }
 
-        setRegistrosHistorico(allRegistros);
+        // Cargar TODOS los detalles una sola vez
+        let allDetalles: Detalles[] = [];
+        try {
+          const detallesRes = await detallesService.getAll(1, 100000);
+          allDetalles = detallesRes.data || [];
+        } catch (err) {
+          console.error("Error cargando detalles:", err);
+          allDetalles = [];
+        }
+
+        // Crear un mapa de detalles por codigo_registro para búsqueda rápida
+        const detallesPorRegistro: { [key: string]: Detalles[] } = {};
+        allDetalles.forEach((detalle) => {
+          const codigoReg = String(detalle.codigo_registro);
+          if (!detallesPorRegistro[codigoReg]) {
+            detallesPorRegistro[codigoReg] = [];
+          }
+          detallesPorRegistro[codigoReg].push(detalle);
+        });
+
+        // Asociar detalles a cada registro
+        const registrosConDetalles = allRegistros.map((registro) => ({
+          ...registro,
+          detalles: detallesPorRegistro[String(registro.codigo_registro)] || [],
+        }));
+
+        setRegistrosHistorico(registrosConDetalles);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Error al cargar datos";
         setError(msg);
@@ -298,17 +337,24 @@ export function HandyRegClient() {
     loadData();
   }, [toast]);
 
-  // Función para obtener registros agrupados y paginados
+  // Función para obtener registros paginados (uno por fila)
   const obtenerRegistrosPaginados = () => {
-    const todosLosGrupos = obtenerRegistrosAgrupados();
-    const totalPages = Math.ceil(todosLosGrupos.length / itemsPerPage);
+    // Ordenar registros por fecha de evento (descendente)
+    const registrosOrdenados = [...registrosHistorico].sort((a, b) => {
+      const fechaA = new Date(a.fecha_evento || a.fecha_creacion).getTime();
+      const fechaB = new Date(b.fecha_evento || b.fecha_creacion).getTime();
+      return fechaB - fechaA;
+    });
+
+    const totalRegistros = registrosOrdenados.length;
+    const totalPages = Math.ceil(totalRegistros / itemsPerPage);
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
-    const gruposPaginados = todosLosGrupos.slice(startIndex, endIndex);
+    const registrosPaginados = registrosOrdenados.slice(startIndex, endIndex);
     
     return {
-      grupos: gruposPaginados,
-      totalGrupos: todosLosGrupos.length,
+      registros: registrosPaginados,
+      totalRegistros,
       totalPages,
       currentPage,
     };
@@ -367,9 +413,10 @@ export function HandyRegClient() {
       try {
         setLoadingTareas(true);
         
-        // Calcular fechas: hoy y hoy + 2 días
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
+        // Calcular fechas: hace 2 días, hoy y hoy + 2 días
+        const fechaInicio = new Date();
+        fechaInicio.setDate(fechaInicio.getDate() - 2);
+        fechaInicio.setHours(0, 0, 0, 0);
         
         const fechaFin = new Date();
         fechaFin.setDate(fechaFin.getDate() + 2);
@@ -377,7 +424,7 @@ export function HandyRegClient() {
 
         const resultado = await serviciosService.getTareasSismacProgramadasPorAreaEIntervaloFechas(
           areaSeleccionada.nombre_area,
-          hoy,
+          fechaInicio,
           fechaFin
         );
 
@@ -404,7 +451,8 @@ export function HandyRegClient() {
       tarea.MAQUINA.toLowerCase().includes(searchLower) ||
       tarea.COMPONENTE.toLowerCase().includes(searchLower) ||
       tarea.TIPO_MTO.toLowerCase().includes(searchLower) ||
-      (tarea.TECNICO && tarea.TECNICO.toLowerCase().includes(searchLower))
+      (tarea.TECNICO && tarea.TECNICO.toLowerCase().includes(searchLower)) ||
+      String(tarea.OT_PRG).includes(searchLower)
     );
   });
 
@@ -1120,7 +1168,7 @@ export function HandyRegClient() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Historial de Registros</CardTitle>
-                <p className="text-sm text-gray-600 mt-2">Total: {registrosHistorico.length} registro(s) | Agrupado por OT: {obtenerRegistrosAgrupados().length} grupo(s)</p>
+                <p className="text-sm text-gray-600 mt-2">Total: {registrosHistorico.length} registro(s)</p>
               </div>
               <Button onClick={() => setShowFormulario(true)} className="bg-blue-600 hover:bg-blue-700">
                 <Plus className="mr-2 h-4 w-4" />
@@ -1133,9 +1181,12 @@ export function HandyRegClient() {
                   <thead className="bg-gray-100">
                     <tr>
                       <th className="px-4 py-3 text-left font-medium">OT</th>
+                      <th className="px-4 py-3 text-left font-medium">Código Registro</th>
                       <th className="px-4 py-3 text-left font-medium">Equipo</th>
                       <th className="px-4 py-3 text-left font-medium">Componente</th>
-                      <th className="px-4 py-3 text-left font-medium">Mediciones</th>
+                      <th className="px-4 py-3 text-left font-medium">Medición</th>
+                      <th className="px-4 py-3 text-left font-medium">Código Detalle</th>
+                      <th className="px-4 py-3 text-left font-medium">Valores Registrados</th>
                       <th className="px-4 py-3 text-left font-medium">Fecha Inicio</th>
                       <th className="px-4 py-3 text-left font-medium">Fecha Fin</th>
                       <th className="px-4 py-3 text-left font-medium">Tiempo Utilizado</th>
@@ -1143,36 +1194,95 @@ export function HandyRegClient() {
                     </tr>
                   </thead>
                   <tbody>
-                    {obtenerRegistrosPaginados().grupos.map((grupo, idx) => {
+                    {obtenerRegistrosPaginados().registros.map((registro, idx) => {
                       // Obtener datos del componente
-                      const componente = componentes.find(c => c.codigo_componente === grupo.primerRegistro.codigo_componente);
+                      const componente = componentes.find(c => c.codigo_componente === registro.codigo_componente);
                       // Obtener datos del equipo a través del componente
                       const equipo = equipos.find(e => e.codigo_equipo === componente?.codigo_equipo);
                       
+                      // Detalles de este registro - validar que pertenecen al registro correcto
+                      const detalles = (registro.detalles || []).filter(
+                        detalle => String(detalle.codigo_registro).trim() === String(registro.codigo_registro).trim()
+                      );
+                      
                       return (
                         <tr key={idx} className="border-t hover:bg-gray-50">
-                          <td className="px-4 py-3 font-semibold text-blue-600">{grupo.ot}</td>
-                          <td className="px-4 py-3">{equipo?.nombre_equipo || "N/A"}</td>
-                          <td className="px-4 py-3">{componente?.nombre_componente || grupo.primerRegistro.codigo_componente}</td>
-                          <td className="px-4 py-3">
-                            <div className="space-y-1">
-                              {grupo.registros.map((reg, regIdx) => (
-                                <div key={regIdx} className="text-xs bg-blue-50 px-2 py-1 rounded">
-                                  {(reg as unknown as { valor?: string | number }).valor ?? "—"} {(reg as unknown as { unidades?: string }).unidades ?? ""}
-                                </div>
-                              ))}
+                          <td className="px-4 py-3 font-semibold text-blue-600" valign="middle">{registro.OT}</td>
+                          <td className="px-4 py-3 font-mono text-xs bg-gray-50" valign="middle">{registro.codigo_registro}</td>
+                          <td className="px-4 py-3" valign="middle">{equipo?.nombre_equipo || "N/A"}</td>
+                          <td className="px-4 py-3" valign="middle">{componente?.nombre_componente || registro.codigo_componente}</td>
+                          <td className="px-4 py-3" valign="middle">
+                            <div className="bg-gray-50 p-2 rounded border border-gray-200">
+                              <div className="font-semibold text-blue-600">
+                                {numeroALetra(registro.medicion)} - {detalles.length > 0 ? (
+                                  getTipoMedicion(detalles[0]) === 'temperatura' ? 'Temperatura' : 
+                                  getTipoMedicion(detalles[0]) === 'vibracion' ? 'Vibración' : 'Otros'
+                                ) : 'N/A'}
+                              </div>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-xs">{typeof grupo.primerRegistro.fecha_inicio_evento === 'string' ? grupo.primerRegistro.fecha_inicio_evento : new Date(grupo.primerRegistro.fecha_inicio_evento).toLocaleString()}</td>
-                          <td className="px-4 py-3 text-xs">{typeof grupo.primerRegistro.fecha_fin_evento === 'string' ? grupo.primerRegistro.fecha_fin_evento : new Date(grupo.primerRegistro.fecha_fin_evento).toLocaleString()}</td>
-                          <td className="px-4 py-3 font-medium text-green-600">{grupo.tiempoUtilizado}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3" valign="middle">
+                            <div className="space-y-1">
+                              {detalles.length > 0 ? (
+                                detalles.map((detalle, detIdx) => (
+                                  <div key={detIdx} className="text-xs font-mono bg-yellow-50 px-2 py-1 rounded border border-yellow-200">
+                                    {detalle.codigo_detalle}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="text-gray-500 text-xs">—</div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3" valign="middle">
+                            <div className="space-y-1">
+                              {detalles.length > 0 ? (
+                                detalles.map((detalle, detIdx) => (
+                                  <div key={detIdx} className="text-xs bg-blue-50 px-2 py-1 rounded">
+                                    {detalle.valor} {detalle.unidades}
+                                    {detalle.orientacion && (
+                                      <span className="text-gray-500 ml-1">({detalle.orientacion})</span>
+                                    )}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="text-gray-500 text-xs">—</div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-xs" valign="middle">
+                            {registro.fecha_evento 
+                              ? (typeof registro.fecha_evento === 'string' 
+                                  ? new Date(registro.fecha_evento).toLocaleString() 
+                                  : (registro.fecha_evento instanceof Date 
+                                      ? registro.fecha_evento.toLocaleString()
+                                      : "—"))
+                              : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-xs" valign="middle">
+                            {registro.fecha_creacion 
+                              ? (typeof registro.fecha_creacion === 'string' 
+                                  ? new Date(registro.fecha_creacion).toLocaleString() 
+                                  : (registro.fecha_creacion instanceof Date 
+                                      ? registro.fecha_creacion.toLocaleString()
+                                      : "—"))
+                              : "—"}
+                          </td>
+                          <td className="px-4 py-3 font-medium text-green-600" valign="middle">
+                            {(() => {
+                              const totalSegundos = registro.tiempo_utilizado;
+                              const horas = Math.floor(totalSegundos / 3600);
+                              const minutos = Math.floor((totalSegundos % 3600) / 60);
+                              return `${horas}h ${minutos}m`;
+                            })()}
+                          </td>
+                          <td className="px-4 py-3" valign="middle">
                             <span className={`px-2 py-1 rounded text-xs font-medium ${
-                              grupo.primerRegistro.estado === "A"
+                              registro.estado === "A"
                                 ? "bg-green-100 text-green-700"
                                 : "bg-gray-100 text-gray-700"
                             }`}>
-                              {grupo.primerRegistro.estado === "A" ? "Activo" : "Inactivo"}
+                              {registro.estado === "A" ? "Activo" : "Inactivo"}
                             </span>
                           </td>
                         </tr>
@@ -1203,7 +1313,7 @@ export function HandyRegClient() {
                 </div>
 
                 <div className="text-sm text-gray-600">
-                  {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, obtenerRegistrosPaginados().totalGrupos)} of {obtenerRegistrosPaginados().totalGrupos}
+                  {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, obtenerRegistrosPaginados().totalRegistros)} of {obtenerRegistrosPaginados().totalRegistros}
                 </div>
 
                 <div className="flex items-center gap-2">

@@ -363,16 +363,18 @@ export interface Registros {
   medicion: number;
   tiempo_utilizado: number;
   fecha_evento?: Date | string;
-  fecha_inicio_evento: Date | string;
-  fecha_fin_evento: Date | string;
+  fecha_inicio_evento?: Date | string;
+  fecha_fin_evento?: Date | string;
   usuario_creacion: string;
   fecha_creacion: Date | string;
   estado: string;
+  componente?: Componente;
+  detalles?: Detalles[];
 }
 
 export interface Detalles {
-  codigo_detalle: number;
-  codigo_registro: number;
+  codigo_detalle: number | string;
+  codigo_registro: number | string;
   valor: number;
   unidades: string;
   orientacion: string;
