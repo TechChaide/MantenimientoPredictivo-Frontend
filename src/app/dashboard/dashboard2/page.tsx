@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import {
   ComposedChart, Scatter, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -67,7 +66,17 @@ type MedicionGroup = {
   charts: ChartSeries[];
 };
 
-type ChartFilter = '' | 'all' | 'temperatura' | 'vibracion';
+type ChartFilter = '' | 'temperatura' | 'vibracion';
+
+type Dashboard2Step = 1 | 2 | 3 | 4 | 5;
+
+const DASHBOARD2_STEPS: { number: Dashboard2Step; title: string }[] = [
+  { number: 1, title: 'Área' },
+  { number: 2, title: 'Equipo' },
+  { number: 3, title: 'Componente' },
+  { number: 4, title: 'Tipo de Gráfica' },
+  { number: 5, title: 'Punto de Medición' },
+];
 
 const ORI_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; accent: string }> = {
   Vertical:   { label: 'Vertical',   color: 'text-blue-700',   bg: 'bg-blue-50',   border: 'border-blue-200',   accent: '#3b82f6' },
@@ -125,10 +134,12 @@ export default function Dashboard2() {
   const [areas, setAreas] = useState<Area[]>([]);
   const [equipos, setEquipos] = useState<Equipo[]>([]);
   const [componentes, setComponentes] = useState<Componente[]>([]);
+  const [allComponentes, setAllComponentes] = useState<Componente[]>([]);
 
   const [selectedArea, setSelectedArea] = useState('');
   const [selectedEquipo, setSelectedEquipo] = useState('');
   const [selectedComponente, setSelectedComponente] = useState('');
+  const [currentStep, setCurrentStep] = useState<Dashboard2Step>(1);
 
   const [registros, setRegistros] = useState<Registros[]>([]);
   const [detalles, setDetalles] = useState<Detalles[]>([]);
@@ -145,17 +156,26 @@ export default function Dashboard2() {
     (async () => {
       try {
         setIsLoading(true);
-        const [areasRes, equiposRes, mostrarTodos] = await Promise.all([
-          areaService.getAll(), equipoService.getAll(), checkMostrarTodosEquipos(),
+        const [areasRes, equiposRes, componentesRes, mostrarTodos] = await Promise.all([
+          areaService.getAll(), equipoService.getAll(), componenteService.getAll(), checkMostrarTodosEquipos(),
         ]);
         const allEquipos = equiposRes.data ?? [];
+        const allComponentesData = componentesRes.data ?? [];
         let allAreas = areasRes.data ?? [];
         if (!mostrarTodos) {
           const loc = typeof window !== 'undefined' ? sessionStorage.getItem('usuario_localidad') : null;
           const regional = loc === 'GYE' ? 2000 : 1000;
           allAreas = allAreas.filter(a => Number(a.regional) === regional && a.estado === 'A');
         }
-        setAreas(allAreas.filter(a => allEquipos.some(e => e.codigo_area === a.codigo_area && e.admite_registros_manuales)));
+        setAllComponentes(allComponentesData);
+        // Un área/equipo se ofrece solo si tiene AL MENOS UN componente que
+        // admite registro manual (el flag es por componente, no por equipo)
+        const equiposConComponenteManual = new Set(
+          allEquipos
+            .filter(e => allComponentesData.some(c => c.codigo_equipo === e.codigo_equipo && c.admite_registros_manuales === true))
+            .map(e => e.codigo_area)
+        );
+        setAreas(allAreas.filter(a => equiposConComponenteManual.has(a.codigo_area)));
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Error al cargar áreas');
       } finally {
@@ -164,21 +184,24 @@ export default function Dashboard2() {
     })();
   }, []);
 
-  // Load equipos
+  // Load equipos: solo los que tienen al menos un componente que admite registro manual
   useEffect(() => {
     if (!selectedArea) { setEquipos([]); setSelectedEquipo(''); return; }
     equipoService.getAll()
-      .then(res => { setEquipos((res.data ?? []).filter(e => e.codigo_area === selectedArea && e.admite_registros_manuales)); setSelectedEquipo(''); })
+      .then(res => {
+        const equiposDelArea = (res.data ?? []).filter(e => e.codigo_area === selectedArea);
+        setEquipos(equiposDelArea.filter(e => allComponentes.some(c => c.codigo_equipo === e.codigo_equipo && c.admite_registros_manuales === true)));
+        setSelectedEquipo('');
+      })
       .catch(() => setEquipos([]));
-  }, [selectedArea]);
+  }, [selectedArea, allComponentes]);
 
-  // Load componentes
+  // Componentes del equipo seleccionado: solo los que admiten registro manual
   useEffect(() => {
     if (!selectedEquipo) { setComponentes([]); setSelectedComponente(''); return; }
-    componenteService.getAll()
-      .then(res => { setComponentes((res.data ?? []).filter(c => c.codigo_equipo === selectedEquipo)); setSelectedComponente(''); })
-      .catch(() => setComponentes([]));
-  }, [selectedEquipo]);
+    setComponentes(allComponentes.filter(c => c.codigo_equipo === selectedEquipo && c.admite_registros_manuales === true));
+    setSelectedComponente('');
+  }, [selectedEquipo, allComponentes]);
 
   // Load registros + detalles
   useEffect(() => {
@@ -223,7 +246,7 @@ export default function Dashboard2() {
     return (
       <div key={keyPrefix} className="space-y-3">
         {/* Stats row */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {[['Mínimo', min], ['Máximo', max], ['Promedio', avg]].map(([label, val]) => (
             <div key={String(label)} className="rounded-lg p-3 text-center" style={{ backgroundColor: `${accent}18` }}>
               <p className="text-xs text-gray-500 mb-1">{label}</p>
@@ -285,24 +308,23 @@ export default function Dashboard2() {
 
   const filteredGroups = (chartFilter === '' ? [] : medicionGroups)
     .map((group) => {
-      const filteredCharts = chartFilter === 'all'
-        ? group.charts
-        : chartFilter === 'vibracion'
-          ? group.charts.filter((c) => isVibracionOrientacion(c.orientacion))
-          : group.charts.filter((c) => !isVibracionOrientacion(c.orientacion));
+      const filteredCharts = chartFilter === 'vibracion'
+        ? group.charts.filter((c) => isVibracionOrientacion(c.orientacion))
+        : group.charts.filter((c) => !isVibracionOrientacion(c.orientacion));
 
       if (!filteredCharts.length) return null;
 
-      const hasVibracion = filteredCharts.some((c) => isVibracionOrientacion(c.orientacion));
-      const nextTipo: 'vibracion' | 'temperatura' = hasVibracion ? 'vibracion' : 'temperatura';
-
       return {
         ...group,
-        tipo: nextTipo,
+        tipo: chartFilter as 'vibracion' | 'temperatura',
         charts: filteredCharts,
       } as MedicionGroup;
     })
     .filter((g): g is MedicionGroup => g !== null);
+
+  // Disponibilidad real de tipos de gráfica para el componente seleccionado
+  const hayTemperatura = medicionGroups.some((g) => g.charts.some((c) => !isVibracionOrientacion(c.orientacion)));
+  const hayVibracion = medicionGroups.some((g) => g.charts.some((c) => isVibracionOrientacion(c.orientacion)));
 
   useEffect(() => {
     if (!selectedLetra) return;
@@ -327,66 +349,55 @@ export default function Dashboard2() {
         <p className="text-gray-600 mt-2">Análisis de tendencias por componente</p>
       </div>
 
-      {/* Filtros */}
+      {/* Stepper */}
       <Card>
-        <CardHeader>
-          <CardTitle>Filtros</CardTitle>
-          <CardDescription>Selecciona área, equipo y componente para visualizar sus mediciones</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {/* Área */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Área</label>
-              <Select value={selectedArea} onValueChange={setSelectedArea}>
-                <SelectTrigger><SelectValue placeholder="Selecciona un área" /></SelectTrigger>
-                <SelectContent>
-                  {areas.map(a => <SelectItem key={a.codigo_area} value={a.codigo_area}>{a.nombre_area}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            {/* Equipo */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Equipo</label>
-              <Select value={selectedEquipo} onValueChange={setSelectedEquipo} disabled={!selectedArea}>
-                <SelectTrigger><SelectValue placeholder={selectedArea ? 'Selecciona un equipo' : 'Primero selecciona un área'} /></SelectTrigger>
-                <SelectContent>
-                  {equipos.map(e => <SelectItem key={e.codigo_equipo} value={e.codigo_equipo}>{e.nombre_equipo}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            {/* Componente */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Componente</label>
-              <Select value={selectedComponente} onValueChange={setSelectedComponente} disabled={!selectedEquipo}>
-                <SelectTrigger><SelectValue placeholder={selectedEquipo ? 'Selecciona un componente' : 'Primero selecciona un equipo'} /></SelectTrigger>
-                <SelectContent>
-                  {componentes.map(c => <SelectItem key={c.codigo_componente} value={c.codigo_componente}>{c.nombre_componente}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Tipo de gráfica */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Tipo de gráficas</label>
-              <Select
-                value={chartFilter || undefined}
-                onValueChange={(value) => setChartFilter(value as ChartFilter)}
-                disabled={!selectedComponente}
-              >
-                <SelectTrigger><SelectValue placeholder="Selecciona tipo" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  <SelectItem value="temperatura">Solo Temperatura</SelectItem>
-                  <SelectItem value="vibracion">Solo Vibración</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {DASHBOARD2_STEPS.map((step, idx) => (
+              <div key={step.number} className="flex items-center shrink-0">
+                <button
+                  type="button"
+                  disabled={step.number >= currentStep}
+                  onClick={() => { if (step.number < currentStep) setCurrentStep(step.number); }}
+                  className={`flex items-center gap-2 ${step.number < currentStep ? 'cursor-pointer' : 'cursor-default'}`}
+                >
+                  <span
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 transition-colors ${
+                      currentStep === step.number
+                        ? 'bg-blue-600 text-white'
+                        : currentStep > step.number
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-gray-200 text-gray-500'
+                    }`}
+                  >
+                    {currentStep > step.number ? '✓' : step.number}
+                  </span>
+                  <span
+                    className={`text-sm font-medium whitespace-nowrap ${
+                      currentStep === step.number ? 'text-blue-700' : currentStep > step.number ? 'text-gray-700' : 'text-gray-400'
+                    }`}
+                  >
+                    {step.title}
+                  </span>
+                </button>
+                {idx < DASHBOARD2_STEPS.length - 1 && (
+                  <div className={`h-0.5 w-8 sm:w-12 mx-2 shrink-0 ${currentStep > step.number ? 'bg-blue-400' : 'bg-gray-200'}`} />
+                )}
+              </div>
+            ))}
           </div>
+          {(selectedArea || selectedEquipo || selectedComponente || chartFilter) && (
+            <p className="text-xs text-gray-500 mt-3 truncate">
+              {areas.find(a => a.codigo_area === selectedArea)?.nombre_area}
+              {selectedEquipo && ` › ${equipos.find(e => e.codigo_equipo === selectedEquipo)?.nombre_equipo ?? ''}`}
+              {selectedComponente && ` › ${componentes.find(c => c.codigo_componente === selectedComponente)?.nombre_componente ?? ''}`}
+              {chartFilter && ` › ${chartFilter === 'temperatura' ? 'Temperatura' : 'Vibración'}`}
+            </p>
+          )}
         </CardContent>
       </Card>
 
-      {/* Alerts */}
+      {/* Alerts generales */}
       {error && (
         <Alert className="border-red-200 bg-red-50">
           <AlertCircle className="h-4 w-4 text-red-600" />
@@ -396,7 +407,7 @@ export default function Dashboard2() {
       {(isLoading || isLoadingData) && (
         <Alert><Activity className="h-4 w-4" /><AlertDescription>Cargando datos...</AlertDescription></Alert>
       )}
-      {!isLoading && !isLoadingData && selectedComponente && chartFilter !== '' && medicionGroups.length > 0 && filteredGroups.length > 0 && (
+      {!isLoading && !isLoadingData && currentStep === 5 && filteredGroups.length > 0 && (
         <Alert>
           <CheckCircle className="h-4 w-4 text-green-600" />
           <AlertDescription className="text-green-800">
@@ -404,33 +415,165 @@ export default function Dashboard2() {
           </AlertDescription>
         </Alert>
       )}
-      {!isLoading && !isLoadingData && selectedComponente && medicionGroups.length === 0 && (
-        <Alert>
-          <AlertCircle className="h-4 w-4 text-yellow-600" />
-          <AlertDescription className="text-yellow-800">No hay datos para el componente seleccionado.</AlertDescription>
-        </Alert>
-      )}
-      {!isLoading && !isLoadingData && selectedComponente && chartFilter === '' && medicionGroups.length > 0 && (
-        <Alert>
-          <AlertCircle className="h-4 w-4 text-yellow-600" />
-          <AlertDescription className="text-yellow-800">Selecciona un valor en "Tipo de gráficas" para visualizar resultados.</AlertDescription>
-        </Alert>
-      )}
-      {!isLoading && !isLoadingData && selectedComponente && chartFilter !== '' && medicionGroups.length > 0 && filteredGroups.length === 0 && (
+      {!isLoading && !isLoadingData && currentStep === 5 && chartFilter !== '' && medicionGroups.length > 0 && filteredGroups.length === 0 && (
         <Alert>
           <AlertCircle className="h-4 w-4 text-yellow-600" />
           <AlertDescription className="text-yellow-800">No hay gráficas para el filtro seleccionado.</AlertDescription>
         </Alert>
       )}
 
+      {/* Paso 1: Área */}
+      {currentStep === 1 && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">Selecciona un Área</h2>
+            <p className="text-sm text-gray-500 mt-1">Elegí el área para continuar</p>
+          </div>
+          {!isLoading && areas.length === 0 ? (
+            <Alert><AlertCircle className="h-4 w-4 text-yellow-600" /><AlertDescription className="text-yellow-800">No hay áreas disponibles.</AlertDescription></Alert>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {areas.map(a => (
+                <button
+                  key={a.codigo_area}
+                  onClick={() => { setSelectedArea(a.codigo_area); setCurrentStep(2); }}
+                  className={`p-6 rounded-2xl border-2 text-left transition-all hover:border-blue-400 hover:shadow-lg ${
+                    selectedArea === a.codigo_area ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <p className="font-bold text-gray-800">{a.nombre_area}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Paso 2: Equipo */}
+      {currentStep === 2 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">Selecciona un Equipo</h2>
+              <p className="text-sm text-gray-500 mt-1">Equipos de {areas.find(a => a.codigo_area === selectedArea)?.nombre_area}</p>
+            </div>
+            <button onClick={() => setCurrentStep(1)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors shrink-0">
+              <ChevronLeft className="w-4 h-4" /> Atrás
+            </button>
+          </div>
+          {equipos.length === 0 ? (
+            <Alert><AlertCircle className="h-4 w-4 text-yellow-600" /><AlertDescription className="text-yellow-800">No hay equipos que admitan registros manuales en esta área.</AlertDescription></Alert>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {equipos.map(e => (
+                <button
+                  key={e.codigo_equipo}
+                  onClick={() => { setSelectedEquipo(e.codigo_equipo); setCurrentStep(3); }}
+                  className={`p-6 rounded-2xl border-2 text-left transition-all hover:border-blue-400 hover:shadow-lg ${
+                    selectedEquipo === e.codigo_equipo ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <p className="font-bold text-gray-800">{e.nombre_equipo}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Paso 3: Componente */}
+      {currentStep === 3 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">Selecciona un Componente</h2>
+              <p className="text-sm text-gray-500 mt-1">Componentes de {equipos.find(e => e.codigo_equipo === selectedEquipo)?.nombre_equipo}</p>
+            </div>
+            <button onClick={() => setCurrentStep(2)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors shrink-0">
+              <ChevronLeft className="w-4 h-4" /> Atrás
+            </button>
+          </div>
+          {componentes.length === 0 ? (
+            <Alert><AlertCircle className="h-4 w-4 text-yellow-600" /><AlertDescription className="text-yellow-800">Este equipo no tiene componentes disponibles.</AlertDescription></Alert>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {componentes.map(c => (
+                <button
+                  key={c.codigo_componente}
+                  onClick={() => { setSelectedComponente(c.codigo_componente); setCurrentStep(4); }}
+                  className={`p-6 rounded-2xl border-2 text-left transition-all hover:border-blue-400 hover:shadow-lg ${
+                    selectedComponente === c.codigo_componente ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <p className="font-bold text-gray-800">{c.nombre_componente}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Paso 4: Tipo de Gráfica — solo se ofrecen los tipos con datos reales */}
+      {currentStep === 4 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">Selecciona el Tipo de Gráfica</h2>
+              <p className="text-sm text-gray-500 mt-1">Solo se muestran los tipos con datos registrados para este componente</p>
+            </div>
+            <button onClick={() => setCurrentStep(3)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors shrink-0">
+              <ChevronLeft className="w-4 h-4" /> Atrás
+            </button>
+          </div>
+          {isLoadingData ? (
+            <Alert><Activity className="h-4 w-4" /><AlertDescription>Cargando datos del componente...</AlertDescription></Alert>
+          ) : medicionGroups.length === 0 ? (
+            <Alert><AlertCircle className="h-4 w-4 text-yellow-600" /><AlertDescription className="text-yellow-800">No hay datos registrados para este componente.</AlertDescription></Alert>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+              {hayTemperatura && (
+                <button
+                  onClick={() => { setChartFilter('temperatura'); setCurrentStep(5); }}
+                  className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-gray-300 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-all group"
+                >
+                  <div className="w-16 h-16 rounded-full bg-orange-100 group-hover:bg-orange-200 flex items-center justify-center transition-colors">
+                    <Thermometer className="h-8 w-8 text-orange-500" />
+                  </div>
+                  <p className="font-bold text-gray-900 text-lg">Temperatura</p>
+                </button>
+              )}
+              {hayVibracion && (
+                <button
+                  onClick={() => { setChartFilter('vibracion'); setCurrentStep(5); }}
+                  className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-gray-300 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group"
+                >
+                  <div className="w-16 h-16 rounded-full bg-blue-100 group-hover:bg-blue-200 flex items-center justify-center transition-colors">
+                    <Waves className="h-8 w-8 text-blue-600" />
+                  </div>
+                  <p className="font-bold text-gray-900 text-lg">Vibración</p>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Paso 5: Punto de Medición + gráficas */}
+      {currentStep === 5 && (
+      <>
       {/* ── Navegación por Puntos de Medición ──────────────────────────────── */}
       {filteredGroups.length > 0 && !selectedLetra && (
         <div className="space-y-4">
-          <div>
-            <h2 className="text-xl font-bold text-gray-800">Puntos de Medición</h2>
-            <p className="text-sm text-gray-500 mt-1">Selecciona un punto para ver sus gráficas de tendencia</p>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">Puntos de Medición</h2>
+              <p className="text-sm text-gray-500 mt-1">Selecciona un punto para ver sus gráficas de tendencia</p>
+            </div>
+            <button onClick={() => setCurrentStep(4)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors shrink-0">
+              <ChevronLeft className="w-4 h-4" /> Atrás
+            </button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {filteredGroups.map(group => {
               const letra = numeroALetra(group.medicion);
               const accent = group.tipo === 'vibracion' ? '#3b82f6' : '#f97316';
@@ -579,8 +722,8 @@ export default function Dashboard2() {
                           <span className="text-xs text-gray-500">{seriesList.reduce((s, c) => s + c.data.length, 0)} puntos totales</span>
                         </div>
 
-                        {/* Grid de gráficas para esta orientación */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Gráficas para esta orientación, apiladas a ancho completo (igual que Temperatura) */}
+                        <div className="space-y-4">
                           {seriesList.map((series, idx) => (
                             <Card key={`${ori}-${series.unidades}-${idx}`} className="border-l-4" style={{ borderLeftColor: cfg.accent }}>
                               <CardHeader className="pb-2">
@@ -612,6 +755,8 @@ export default function Dashboard2() {
               );
             })()}
           </div>
+      )}
+      </>
       )}
     </div>
   );

@@ -7,8 +7,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
+import { Pencil, Trash2, CalendarRange } from "lucide-react";
 import { referenciaService } from "@/services/referencia.service";
 import type { Referencia } from "@/types/interfaces";
+
+const formatFechaCorta = (value: unknown): string => {
+  if (!value) return '—';
+  const d = new Date(value as string);
+  if (isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString('es-EC', { day: '2-digit', month: 'short', year: 'numeric' });
+};
 
 interface Props {
   isOpen: boolean;
@@ -64,6 +72,15 @@ export default function ReferenciasModal({ isOpen, onClose, componenteId, compon
 
   const canSave = () => !!form.codigo_componente && !!form.fecha_inicio_referencia && !!form.fecha_fin_referencia && !!form.estado;
 
+  const duracionDias = (() => {
+    if (!form.fecha_inicio_referencia || !form.fecha_fin_referencia) return null;
+    const inicio = new Date(form.fecha_inicio_referencia as string);
+    const fin = new Date(form.fecha_fin_referencia as string);
+    if (isNaN(inicio.getTime()) || isNaN(fin.getTime())) return null;
+    const dias = Math.round((fin.getTime() - inicio.getTime()) / (1000 * 60 * 60 * 24));
+    return dias;
+  })();
+
   const handleSave = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!canSave()) return;
@@ -102,7 +119,7 @@ export default function ReferenciasModal({ isOpen, onClose, componenteId, compon
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-none w-[80vw]">
+      <DialogContent className="max-w-none w-[95vw] sm:w-[80vw]">
         <DialogHeader>
           <DialogTitle>Referencias - {String(componenteNombre ?? componenteId)}</DialogTitle>
         </DialogHeader>
@@ -114,8 +131,8 @@ export default function ReferenciasModal({ isOpen, onClose, componenteId, compon
             </Alert>
           )}
 
-          <div className="flex gap-4">
-            <div className="w-1/2">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="w-full md:w-1/2">
               <div className="mb-2 flex items-center justify-between">
                 <h4 className="font-semibold">Listado</h4>
                 <div>
@@ -138,11 +155,17 @@ export default function ReferenciasModal({ isOpen, onClose, componenteId, compon
                     {!loading && items.map(it => (
                       <tr key={it.codigo_referencia} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-mono">{it.codigo_referencia}</td>
-                        <td className="px-3 py-2">{String(it.fecha_inicio_referencia)}</td>
-                        <td className="px-3 py-2">{String(it.fecha_fin_referencia)}</td>
+                        <td className="px-3 py-2">{formatFechaCorta(it.fecha_inicio_referencia)}</td>
+                        <td className="px-3 py-2">{formatFechaCorta(it.fecha_fin_referencia)}</td>
                         <td className="px-3 py-2 text-center">
-                          <Button size="sm" variant="ghost" onClick={() => startEdit(it)}>Editar</Button>
-                          <Button size="sm" variant="ghost" className="text-red-600" onClick={() => handleDelete(it.codigo_referencia)} disabled={deletingId === it.codigo_referencia}>Eliminar</Button>
+                          <div className="flex items-center justify-center gap-1">
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="Editar" onClick={() => startEdit(it)}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-red-600 hover:text-red-700" title="Eliminar" onClick={() => handleDelete(it.codigo_referencia)} disabled={deletingId === it.codigo_referencia}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -151,21 +174,40 @@ export default function ReferenciasModal({ isOpen, onClose, componenteId, compon
               </div>
             </div>
 
-            <div className="w-1/2">
-              <form onSubmit={handleSave} className="bg-white p-4 rounded border">
-                <div className="mb-2">
-                  <Label htmlFor="codigo_referencia">Código</Label>
-                  <Input id="codigo_referencia" value={String(form.codigo_referencia ?? "")} disabled className="mt-1" />
+            <div className="w-full md:w-1/2">
+              <form onSubmit={handleSave} className="bg-white p-4 rounded border space-y-3">
+                {formMode === 'edit' && (
+                  <div>
+                    <Label htmlFor="codigo_referencia">Código</Label>
+                    <Input id="codigo_referencia" value={String(form.codigo_referencia ?? "")} disabled className="mt-1" />
+                  </div>
+                )}
+
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-blue-700">
+                    <CalendarRange className="h-4 w-4" />
+                    <span className="text-sm font-semibold">Período de referencia</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label htmlFor="fecha_inicio_referencia" className="text-xs">Inicio *</Label>
+                      <Input id="fecha_inicio_referencia" type="date" value={String(form.fecha_inicio_referencia ?? "")} onChange={e => onChange('fecha_inicio_referencia', e.target.value)} required className="mt-1 bg-white" />
+                    </div>
+                    <div>
+                      <Label htmlFor="fecha_fin_referencia" className="text-xs">Fin *</Label>
+                      <Input id="fecha_fin_referencia" type="date" value={String(form.fecha_fin_referencia ?? "")} onChange={e => onChange('fecha_fin_referencia', e.target.value)} required className="mt-1 bg-white" />
+                    </div>
+                  </div>
+                  {duracionDias !== null && (
+                    <p className="text-xs text-blue-700">
+                      {duracionDias >= 0
+                        ? `Duración: ${duracionDias} día${duracionDias !== 1 ? 's' : ''}`
+                        : 'La fecha de fin debe ser posterior a la de inicio'}
+                    </p>
+                  )}
                 </div>
-                <div className="mb-2">
-                  <Label htmlFor="fecha_inicio_referencia">Fecha inicio *</Label>
-                  <Input id="fecha_inicio_referencia" type="date" value={String(form.fecha_inicio_referencia ?? "")} onChange={e => onChange('fecha_inicio_referencia', e.target.value)} required className="mt-1" />
-                </div>
-                <div className="mb-2">
-                  <Label htmlFor="fecha_fin_referencia">Fecha fin *</Label>
-                  <Input id="fecha_fin_referencia" type="date" value={String(form.fecha_fin_referencia ?? "")} onChange={e => onChange('fecha_fin_referencia', e.target.value)} required className="mt-1" />
-                </div>
-                <div className="mb-2">
+
+                <div>
                   <Label htmlFor="estado">Estado *</Label>
                   <select id="estado" className="w-full rounded-md border px-3 py-2 text-sm bg-white mt-1" value={String(form.estado ?? 'A')} onChange={e => onChange('estado', e.target.value)}>
                     <option value="A">Activo</option>

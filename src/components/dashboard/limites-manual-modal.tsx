@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { limitesService } from "@/services/limites.service";
+import { sanitizeDecimalInput } from "@/lib/utils";
 import type { Limites } from "@/types/interfaces";
 
 interface Props {
@@ -247,10 +249,11 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
                 <Label htmlFor="zona_segura_inf">Límite Inf. Zona Segura</Label>
                 <Input
                   id="zona_segura_inf"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.,]?[0-9]*"
                   value={form.zona_segura_inf || ""}
-                  onChange={(e) => onChange("zona_segura_inf" as any, e.target.value)}
+                  onChange={(e) => onChange("zona_segura_inf" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
@@ -258,10 +261,11 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
                 <Label htmlFor="zona_segura_sup">Límite Sup. Zona Segura</Label>
                 <Input
                   id="zona_segura_sup"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.,]?[0-9]*"
                   value={form.zona_segura_sup || ""}
-                  onChange={(e) => onChange("zona_segura_sup" as any, e.target.value)}
+                  onChange={(e) => onChange("zona_segura_sup" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
@@ -273,10 +277,11 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
                 <Label htmlFor="zona_alerta_inf">Límite Inf. Zona de Alerta</Label>
                 <Input
                   id="zona_alerta_inf"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.,]?[0-9]*"
                   value={form.zona_alerta_inf || ""}
-                  onChange={(e) => onChange("zona_alerta_inf" as any, e.target.value)}
+                  onChange={(e) => onChange("zona_alerta_inf" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
@@ -284,10 +289,11 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
                 <Label htmlFor="zona_alerta_sup">Límite Sup. Zona de Alerta</Label>
                 <Input
                   id="zona_alerta_sup"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.,]?[0-9]*"
                   value={form.zona_alerta_sup || ""}
-                  onChange={(e) => onChange("zona_alerta_sup" as any, e.target.value)}
+                  onChange={(e) => onChange("zona_alerta_sup" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
@@ -299,10 +305,11 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
                 <Label htmlFor="zona_critica_inf">Límite Inf. Zona Crítica</Label>
                 <Input
                   id="zona_critica_inf"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.,]?[0-9]*"
                   value={form.zona_critica_inf || ""}
-                  onChange={(e) => onChange("zona_critica_inf" as any, e.target.value)}
+                  onChange={(e) => onChange("zona_critica_inf" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
@@ -310,10 +317,11 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
                 <Label htmlFor="zona_critica_sup">Límite Sup. Zona Crítica</Label>
                 <Input
                   id="zona_critica_sup"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.,]?[0-9]*"
                   value={form.zona_critica_sup || ""}
-                  onChange={(e) => onChange("zona_critica_sup" as any, e.target.value)}
+                  onChange={(e) => onChange("zona_critica_sup" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
@@ -324,10 +332,11 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
               <Label htmlFor="sigma_limite">Sigma Límite</Label>
               <Input
                 id="sigma_limite"
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
                 value={form.sigma_limite || ""}
-                onChange={(e) => onChange("sigma_limite" as any, e.target.value)}
+                onChange={(e) => onChange("sigma_limite" as any, sanitizeDecimalInput(e.target.value))}
                 placeholder="0"
               />
             </div>

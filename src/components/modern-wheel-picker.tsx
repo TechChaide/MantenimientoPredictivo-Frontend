@@ -2,6 +2,7 @@
 
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface WheelPickerOption {
   value: string;
@@ -23,9 +24,12 @@ export function ModernWheelPicker({
   label = 'Ventana de Análisis',
   suffix = 'min',
 }: ModernWheelPickerProps) {
+  const isMobile = useIsMobile();
   const ITEM_WIDTH = 52;
-  const CONTAINER_WIDTH = ITEM_WIDTH * 7;
-  
+  const VISIBLE_ITEMS = isMobile ? 5 : 7;
+  const CONTAINER_WIDTH = ITEM_WIDTH * VISIBLE_ITEMS;
+  const EDGE_ITEMS = Math.floor(VISIBLE_ITEMS / 2);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentIndex = options.findIndex(opt => opt.value === value);
   const [activeIndex, setActiveIndex] = useState(Math.max(0, currentIndex));
@@ -144,7 +148,7 @@ export function ModernWheelPicker({
         <div className="absolute right-0 top-0 bottom-0 w-20 z-10 pointer-events-none rounded-r-2xl" style={{ background: 'linear-gradient(to left, rgba(250,250,250,0.95), transparent)' }} />
         <div className="absolute top-1 bottom-1 z-[5] rounded-xl pointer-events-none" style={{ left: '50%', width: ITEM_WIDTH + 6, transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.055)', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.06)' }} />
 
-        <div ref={scrollRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onScroll={handleScroll} onWheel={handleWheel} className="flex items-center overflow-x-auto cursor-grab active:cursor-grabbing" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory', height: 54, paddingLeft: ITEM_WIDTH * 3, paddingRight: ITEM_WIDTH * 3 }}>
+        <div ref={scrollRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onScroll={handleScroll} onWheel={handleWheel} className="flex items-center overflow-x-auto cursor-grab active:cursor-grabbing" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory', height: 54, paddingLeft: ITEM_WIDTH * EDGE_ITEMS, paddingRight: ITEM_WIDTH * EDGE_ITEMS }}>
           {options.map((opt, idx) => (
             <div key={opt.value} onClick={() => { setActiveIndex(idx); onValueChange(opt.value); if (scrollRef.current) scrollRef.current.scrollTo({ left: idx * ITEM_WIDTH, behavior: 'smooth' }); }} className="flex-shrink-0 flex items-center justify-center cursor-pointer" style={{ width: ITEM_WIDTH, height: 54, scrollSnapAlign: 'center', opacity: getItemOpacity(idx), transform: `scale(${getItemScale(idx)})`, transition: isDraggingRef.current ? 'none' : 'all 0.25s ease-out' }}>
               <span className={cn('tabular-nums transition-colors duration-150', idx === activeIndex ? 'text-[22px] font-bold text-gray-900' : 'text-[16px] font-medium text-gray-400')} style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>{opt.label}</span>

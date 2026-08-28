@@ -30,46 +30,42 @@ export function DateRangePicker({ className, initialDate }: DateRangePickerProps
   const [isClient, setIsClient] = React.useState(false);
   const [timeZone, setTimeZone] = React.useState('UTC');
   const [popoverOpen, setPopoverOpen] = React.useState(false);
-  const updateTimeoutRef = React.useRef<NodeJS.Timeout>();
 
   const sinceStartDate = new Date('2025-04-10T00:00:00Z');
 
   React.useEffect(() => {
       setDate(initialDate);
   }, [initialDate]);
-  
+
   React.useEffect(() => {
     setIsClient(true);
     setTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
-    
-    // Cleanup del timeout al desmontar
-    return () => {
-      if (updateTimeoutRef.current) clearTimeout(updateTimeoutRef.current);
-    };
   }, []);
 
   const updateURL = React.useCallback((range: DateRange | undefined) => {
-    // Debounce: espera 300ms antes de actualizar URL
-    if (updateTimeoutRef.current) clearTimeout(updateTimeoutRef.current);
-    
-    updateTimeoutRef.current = setTimeout(() => {
-      const newParams = new URLSearchParams();
-      
-      if (range?.from) {
-        newParams.set("from", format(range.from, "yyyy-MM-dd"));
-        
-        const toDate = range.to || range.from;
-        const today = new Date();
+    // Se actualiza la URL de inmediato: esta función ya solo se llama una vez
+    // por selección completa (no en cada clic intermedio), así que no hace
+    // falta debounce — y esperar acá causaba que al avanzar rápido al
+    // siguiente paso del wizard se usara todavía el rango de fechas viejo.
+    // IMPORTANTE: se parte de los parámetros ACTUALES de la URL (no de uno
+    // vacío) para no perder "machine"/"component" ya seleccionados en pasos
+    // anteriores del wizard.
+    const newParams = new URLSearchParams(window.location.search);
 
-        if (toDate && isSameDay(toDate, today)) {
-            newParams.set("to", today.toISOString()); 
-        } else if (toDate) {
-            newParams.set("to", format(toDate, "yyyy-MM-dd"));
-        }
+    if (range?.from) {
+      newParams.set("from", format(range.from, "yyyy-MM-dd"));
+
+      const toDate = range.to || range.from;
+      const today = new Date();
+
+      if (toDate && isSameDay(toDate, today)) {
+          newParams.set("to", today.toISOString());
+      } else if (toDate) {
+          newParams.set("to", format(toDate, "yyyy-MM-dd"));
       }
-      
-      router.push(`${pathname}?${newParams.toString()}`);
-    }, 300);
+    }
+
+    router.push(`${pathname}?${newParams.toString()}`);
   }, [pathname, router]);
 
   const handleSelect = React.useCallback((range: DateRange | undefined) => {
@@ -187,16 +183,16 @@ export function DateRangePicker({ className, initialDate }: DateRangePickerProps
             )}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0 flex" align="start">
-            <div className="flex flex-col justify-start p-2 border-r">
+        <PopoverContent className="w-auto p-0 flex flex-col sm:flex-row max-w-[95vw]" align="start">
+            <div className="flex flex-col justify-start p-2 border-b sm:border-b-0 sm:border-r">
                 <div className="px-2 py-1.5 text-xs font-semibold text-slate-500">Atajos</div>
-                <div className="flex flex-col gap-1">
-                    <Button variant="ghost" className="justify-start text-sm h-8" onClick={() => handlePreset('last30days')}>Últimos 30 días</Button>
-                    <Button variant="ghost" className="justify-start text-sm h-8" onClick={() => handlePreset('last3Months')}>Últimos 3 Meses</Button>
-                    <Button variant="ghost" className="justify-start text-sm h-8" onClick={() => handlePreset('lastYear')}>Último Año</Button>
-                    <Button variant="ghost" className="justify-start text-sm h-8" onClick={() => handlePreset('sinceStart')}>Desde Inicio</Button>
-                    <Separator className="my-1" />
-                    <Button variant="ghost" className="justify-start text-sm h-8 text-destructive hover:text-destructive" onClick={(e) => handleClear(e)}>Limpiar</Button>
+                <div className="flex flex-row sm:flex-col gap-1 overflow-x-auto">
+                    <Button variant="ghost" className="justify-start text-sm h-8 shrink-0 whitespace-nowrap" onClick={() => handlePreset('last30days')}>Últimos 30 días</Button>
+                    <Button variant="ghost" className="justify-start text-sm h-8 shrink-0 whitespace-nowrap" onClick={() => handlePreset('last3Months')}>Últimos 3 Meses</Button>
+                    <Button variant="ghost" className="justify-start text-sm h-8 shrink-0 whitespace-nowrap" onClick={() => handlePreset('lastYear')}>Último Año</Button>
+                    <Button variant="ghost" className="justify-start text-sm h-8 shrink-0 whitespace-nowrap" onClick={() => handlePreset('sinceStart')}>Desde Inicio</Button>
+                    <Separator className="hidden sm:block my-1" />
+                    <Button variant="ghost" className="justify-start text-sm h-8 shrink-0 whitespace-nowrap text-destructive hover:text-destructive" onClick={(e) => handleClear(e)}>Limpiar</Button>
                 </div>
             </div>
             <div>

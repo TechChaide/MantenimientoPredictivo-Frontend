@@ -204,7 +204,7 @@ export default function EventFlowModal({ open, onClose, entry, mode, machineName
 
           <div>
             <div className="text-xs text-slate-500">Parámetros</div>
-            <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
               {Object.entries(paramsObj || {}).length === 0 ? (
                 <div className="text-sm text-slate-500">No hay parámetros</div>
               ) : (
@@ -226,7 +226,7 @@ export default function EventFlowModal({ open, onClose, entry, mode, machineName
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                   <div>
                     <label className="text-xs text-slate-500">Fecha inicio (máx -2h)</label>
                     <input

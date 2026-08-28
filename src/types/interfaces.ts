@@ -337,6 +337,11 @@ export interface Componente {
   codigo_componente: string;
   codigo_equipo: string;
   nombre_componente: string;
+  // Valor propio del componente (independiente del Equipo). El backend aún
+  // no tiene una columna dedicada en `componente` — hoy `componenteService`
+  // usa como respaldo el valor anidado en `componente.equipo` mientras esa
+  // columna no exista.
+  admite_registros_manuales?: boolean;
   estado: string;
 }
 

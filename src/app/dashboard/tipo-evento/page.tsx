@@ -430,9 +430,9 @@ export default function TipoEventoPage() {
                 <div className="mb-4">
                   <div className="mb-3">
                     <Label>Agregar Categoria</Label>
-                    <div className="flex gap-2 mt-2">
+                    <div className="flex flex-col sm:flex-row gap-2 mt-2">
                       <Input value={newCategoryDesc} onChange={e => setNewCategoryDesc(e.target.value)} placeholder="Descripción" />
-                      <select value={newCategoryEstado} onChange={e => setNewCategoryEstado(e.target.value)} className="border rounded px-2">
+                      <select value={newCategoryEstado} onChange={e => setNewCategoryEstado(e.target.value)} className="border rounded px-2 w-full sm:w-auto">
                         <option value="A">Activo</option>
                         <option value="I">Inactivo</option>
                       </select>

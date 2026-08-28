@@ -5,6 +5,17 @@ import { environment } from "@/environments/environments.prod";
 
 const API_URL = `${environment.apiURL}/api/componente`;
 
+// `admite_registros_manuales` es un valor propio del componente, pero el
+// backend todavía no tiene una columna dedicada en `componente` (solo existe
+// en `equipo`). Mientras tanto, se prioriza un valor plano si el backend
+// llega a devolverlo, y si no, se usa el de `equipo` como respaldo.
+function withAdmiteRegistrosManuales(c: any): Componente {
+  return {
+    ...c,
+    admite_registros_manuales: c?.admite_registros_manuales ?? c?.equipo?.admite_registros_manuales ?? undefined,
+  };
+}
+
 export const componenteService = {
   async getAll(): Promise<BodyListResponse<Componente>> {
     const response = await fetch(API_URL);
@@ -12,7 +23,8 @@ export const componenteService = {
       const errorBody = await response.json().catch(() => ({ message: 'Error desconocido' }));
       throw new Error(errorBody.message || 'Failed to fetch componentes');
     }
-    return response.json();
+    const body = await response.json();
+    return { ...body, data: Array.isArray(body?.data) ? body.data.map(withAdmiteRegistrosManuales) : body?.data };
   },
 
   async getById(id: number | string): Promise<BodyResponse<Componente>> {
@@ -21,7 +33,8 @@ export const componenteService = {
       const errorBody = await response.json().catch(() => ({ message: 'Error desconocido' }));
       throw new Error(errorBody.message || `Failed to fetch componente with id ${id}`);
     }
-    return response.json();
+    const body = await response.json();
+    return { ...body, data: body?.data ? withAdmiteRegistrosManuales(body.data) : body?.data };
   },
 
   async save(data: Componente): Promise<BodyResponse<Componente>> {
@@ -34,7 +47,16 @@ export const componenteService = {
       const errorBody = await response.json().catch(() => ({ message: 'Error desconocido' }));
       throw new Error(errorBody.message || 'Failed to save componente');
     }
-    return response.json();
+    const body = await response.json();
+    // Si el backend todavía no persiste `admite_registros_manuales` en el
+    // componente, se conserva el valor que el usuario acaba de elegir para
+    // que la tabla no lo "olvide" apenas se guarda.
+    return {
+      ...body,
+      data: body?.data
+        ? withAdmiteRegistrosManuales({ ...body.data, admite_registros_manuales: body.data.admite_registros_manuales ?? data.admite_registros_manuales })
+        : body?.data,
+    };
   },
 
   async delete(id: number | string): Promise<void> {

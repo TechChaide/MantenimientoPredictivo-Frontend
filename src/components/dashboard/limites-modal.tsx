@@ -7,7 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
+import { Zap, Scale, Gauge, Pencil, Trash2, Info } from "lucide-react";
 import { limitesService } from "@/services/limites.service";
+import { sanitizeDecimalInput } from "@/lib/utils";
 import type { Limites } from "@/types/interfaces";
 
 interface Props {
@@ -128,7 +130,7 @@ export default function LimitesModal({ isOpen, onClose, componenteId, componente
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-none w-[80vw]">
+      <DialogContent className="max-w-none w-[95vw] sm:w-[80vw]">
           <DialogHeader>
             <DialogTitle>Límites - {String(componenteNombre ?? componenteId)}</DialogTitle>
           </DialogHeader>
@@ -140,8 +142,8 @@ export default function LimitesModal({ isOpen, onClose, componenteId, componente
             </Alert>
           )}
 
-          <div className="flex gap-4">
-            <div className="w-1/2">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="w-full md:w-1/2">
               <div className="mb-2 flex items-center justify-between">
                 <h4 className="font-semibold">Listado</h4>
                 <div>
@@ -169,8 +171,14 @@ export default function LimitesModal({ isOpen, onClose, componenteId, componente
                         <td className="px-3 py-2">{String(it.desbalance_limite_sup ?? '')}/{String(it.desbalance_limite_inf ?? '')}</td>
                         <td className="px-3 py-2">{String(it.sigma_limite ?? '')}</td>
                         <td className="px-3 py-2 text-center">
-                          <Button size="sm" variant="ghost" onClick={() => startEdit(it)}>Editar</Button>
-                          <Button size="sm" variant="ghost" className="text-red-600" onClick={() => handleDelete(it.codigo_limite)} disabled={deletingId === it.codigo_limite}>Eliminar</Button>
+                          <div className="flex items-center justify-center gap-1">
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="Editar" onClick={() => startEdit(it)}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-red-600 hover:text-red-700" title="Eliminar" onClick={() => handleDelete(it.codigo_limite)} disabled={deletingId === it.codigo_limite}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -179,49 +187,77 @@ export default function LimitesModal({ isOpen, onClose, componenteId, componente
               </div>
             </div>
 
-            <div className="w-1/2">
-              <form onSubmit={handleSave} className="bg-white p-4 rounded border space-y-2">
+            <div className="w-full md:w-1/2">
+              <form onSubmit={handleSave} className="bg-white p-4 rounded border space-y-3">
+                {formMode === 'edit' && (
+                  <div>
+                    <Label htmlFor="codigo_limite">Código</Label>
+                    <Input id="codigo_limite" value={String(form.codigo_limite ?? "")} disabled className="mt-1" />
+                  </div>
+                )}
+
+                {/* Corriente */}
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-blue-700">
+                    <Zap className="h-4 w-4" />
+                    <span className="text-sm font-semibold">Corriente</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label htmlFor="corriente_limite_sup" className="text-xs">Superior (A)</Label>
+                      <Input id="corriente_limite_sup" type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={String(form.corriente_limite_sup ?? '')} onChange={e => onChange('corriente_limite_sup', sanitizeDecimalInput(e.target.value))} className="mt-1 bg-white" />
+                    </div>
+                    <div>
+                      <Label htmlFor="corriente_limite_inf" className="text-xs">Inferior (A)</Label>
+                      <Input id="corriente_limite_inf" type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={String(form.corriente_limite_inf ?? '')} onChange={e => onChange('corriente_limite_inf', sanitizeDecimalInput(e.target.value))} className="mt-1 bg-white" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Desbalance */}
+                <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-orange-700">
+                    <Scale className="h-4 w-4" />
+                    <span className="text-sm font-semibold">Desbalance</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label htmlFor="desbalance_limite_sup" className="text-xs">Superior (%)</Label>
+                      <Input id="desbalance_limite_sup" type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={String(form.desbalance_limite_sup ?? '')} onChange={e => onChange('desbalance_limite_sup', sanitizeDecimalInput(e.target.value))} className="mt-1 bg-white" />
+                    </div>
+                    <div>
+                      <Label htmlFor="desbalance_limite_inf" className="text-xs">Inferior (%)</Label>
+                      <Input id="desbalance_limite_inf" type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={String(form.desbalance_limite_inf ?? '')} onChange={e => onChange('desbalance_limite_inf', sanitizeDecimalInput(e.target.value))} className="mt-1 bg-white" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Factor de carga */}
+                <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-purple-700">
+                    <Gauge className="h-4 w-4" />
+                    <span className="text-sm font-semibold">Factor de Carga</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label htmlFor="factor_carga_limite_sup" className="text-xs">Superior (%)</Label>
+                      <Input id="factor_carga_limite_sup" type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={String(form.factor_carga_limite_sup ?? '')} onChange={e => onChange('factor_carga_limite_sup', sanitizeDecimalInput(e.target.value))} className="mt-1 bg-white" />
+                    </div>
+                    <div>
+                      <Label htmlFor="factor_carga_limite_inf" className="text-xs">Inferior (%)</Label>
+                      <Input id="factor_carga_limite_inf" type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={String(form.factor_carga_limite_inf ?? '')} onChange={e => onChange('factor_carga_limite_inf', sanitizeDecimalInput(e.target.value))} className="mt-1 bg-white" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sigma */}
                 <div>
-                  <Label htmlFor="codigo_limite">Código</Label>
-                  <Input id="codigo_limite" value={String(form.codigo_limite ?? "")} disabled className="mt-1" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label htmlFor="corriente_limite_sup">Corriente sup</Label>
-                    <Input id="corriente_limite_sup" type="number" step="any" value={String(form.corriente_limite_sup ?? '')} onChange={e => onChange('corriente_limite_sup', e.target.value)} className="mt-1" />
-                  </div>
-                  <div>
-                    <Label htmlFor="corriente_limite_inf">Corriente inf</Label>
-                    <Input id="corriente_limite_inf" type="number" step="any" value={String(form.corriente_limite_inf ?? '')} onChange={e => onChange('corriente_limite_inf', e.target.value)} className="mt-1" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label htmlFor="desbalance_limite_sup">Desbalance sup</Label>
-                    <Input id="desbalance_limite_sup" type="number" step="any" value={String(form.desbalance_limite_sup ?? '')} onChange={e => onChange('desbalance_limite_sup', e.target.value)} className="mt-1" />
-                  </div>
-                  <div>
-                    <Label htmlFor="desbalance_limite_inf">Desbalance inf</Label>
-                    <Input id="desbalance_limite_inf" type="number" step="any" value={String(form.desbalance_limite_inf ?? '')} onChange={e => onChange('desbalance_limite_inf', e.target.value)} className="mt-1" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label htmlFor="factor_carga_limite_sup">Factor carga sup</Label>
-                    <Input id="factor_carga_limite_sup" type="number" step="any" value={String(form.factor_carga_limite_sup ?? '')} onChange={e => onChange('factor_carga_limite_sup', e.target.value)} className="mt-1" />
-                  </div>
-                  <div>
-                    <Label htmlFor="factor_carga_limite_inf">Factor carga inf</Label>
-                    <Input id="factor_carga_limite_inf" type="number" step="any" value={String(form.factor_carga_limite_inf ?? '')} onChange={e => onChange('factor_carga_limite_inf', e.target.value)} className="mt-1" />
-                  </div>
-                </div>
-
-                <div className="mb-2">
                   <Label htmlFor="sigma_limite">Sigma límite</Label>
-                  <Input id="sigma_limite" type="number" step="any" value={String(form.sigma_limite ?? '')} onChange={e => onChange('sigma_limite', e.target.value)} className="mt-1" />
+                  <Input id="sigma_limite" type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={String(form.sigma_limite ?? '')} onChange={e => onChange('sigma_limite', sanitizeDecimalInput(e.target.value))} className="mt-1" />
+                  <p className="mt-1 flex items-start gap-1 text-xs text-muted-foreground">
+                    <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    Se usa junto con las Zonas (ver "Límites Manual") para dibujar las bandas de color del gráfico.
+                  </p>
                 </div>
 
                 <div>

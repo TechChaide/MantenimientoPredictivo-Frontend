@@ -3,15 +3,16 @@
 export const dynamic = "force-dynamic";
 
 import { Suspense } from 'react';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 import { SidebarProvider, Sidebar, SidebarInset, SidebarHeader, SidebarContent, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { SidebarNav } from '@/components/dashboard/sidebar-nav';
 import { DashboardClient } from '@/components/dashboard/dashboard-client';
-import { useRealMaintenanceData, type MachineId, type Component, type Machine } from "@/lib/data";
+import { useRealMaintenanceData, aggregateDataByDateTime, type MachineId, type Component, type Machine } from "@/lib/data";
 import type { DateRange } from "react-day-picker";
 import { format, parseISO, subDays, subYears, differenceInDays, isSameDay } from "date-fns";
-import { Bot, MousePointerClick, Loader } from "lucide-react";
+import { Bot, MousePointerClick, Loader, ChevronLeft } from "lucide-react";
 import { DateRangePicker } from "@/components/dashboard/date-range-picker";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -19,8 +20,27 @@ import { useState, useEffect, useMemo } from 'react';
 import { calculosCorrientesDatosMantenimientoService } from "@/services/calculoscorrientesdatosmantenimiento.service";
 import { equipoService } from "@/services/equipo.service";
 import { areaService } from "@/services/area.service";
+import { componenteService } from "@/services/componente.service";
 import { checkMostrarTodosEquipos } from "@/lib/mostrar-todos-equipos";
 import { useToast } from "@/hooks/use-toast";
+import type { Area, Equipo, Componente } from "@/types/interfaces";
+
+// Normaliza nombres para poder cruzar el "COMPONENTE" que devuelve el endpoint
+// de analítica (texto libre) contra `nombre_componente` del maestro de componentes.
+const normalizeCompName = (s: string) => (s || "").toString().trim().toLowerCase();
+
+type DashboardStep = 1 | 2 | 3 | 4 | 5 | 6;
+
+const DASHBOARD_STEPS: { number: DashboardStep; title: string }[] = [
+  { number: 1, title: "Área" },
+  { number: 2, title: "Máquina" },
+  { number: 3, title: "Componente" },
+  { number: 4, title: "Días de Predicción" },
+  { number: 5, title: "Calendario" },
+  { number: 6, title: "Gráfica" },
+];
+
+const PREDICTION_DAYS_OPTIONS = [5, 10, 15, 30, 45, 60];
 
 function EmptyState() {
   return (
@@ -85,8 +105,14 @@ function DashboardContent() {
   const router = useRouter();
   const pathname = usePathname();
   const { toast } = useToast();
-  const [machineList, setMachineList] = useState<Machine[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [equipos, setEquipos] = useState<Equipo[]>([]);
+  const [componentes, setComponentes] = useState<Componente[]>([]);
+  const [selectedArea, setSelectedArea] = useState<string>('');
+  const [currentStep, setCurrentStep] = useState<DashboardStep>(1);
+  const [stepperInitialized, setStepperInitialized] = useState(false);
   const [componentList, setComponentList] = useState<Component[]>([]);
+  const [componentsLoading, setComponentsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [cachedData, setCachedData] = useState<Record<string, any>>({});
   const [chartLoading, setChartLoading] = useState(false);
@@ -94,7 +120,7 @@ function DashboardContent() {
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [predictionDays, setPredictionDays] = useState<number>(15);
-  
+
   // Set default date range on first load
   useEffect(() => {
     const from = searchParams.get('from');
@@ -110,41 +136,78 @@ function DashboardContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 1. Fetch de Máquinas (filtradas por regional del usuario, salvo MOSTRAR_TODOS_EQUIPOS)
+  // 1. Fetch de Áreas y Equipos (filtrados por regional del usuario, salvo MOSTRAR_TODOS_EQUIPOS)
   useEffect(() => {
     async function fetchInitialData() {
       try {
-        const [areasResp, equiposResp, mostrarTodos] = await Promise.all([
+        const [areasResp, equiposResp, componentesResp, mostrarTodos] = await Promise.all([
           areaService.getAll(),
           equipoService.getAll(),
+          componenteService.getAll(),
           checkMostrarTodosEquipos(),
         ]);
 
-        const areas = Array.isArray(areasResp.data) ? areasResp.data : [];
-        const equipos = Array.isArray(equiposResp.data) ? equiposResp.data : [];
+        const allAreas = Array.isArray(areasResp.data) ? areasResp.data : [];
+        const allEquipos = Array.isArray(equiposResp.data) ? equiposResp.data : [];
+        const allComponentes = Array.isArray(componentesResp.data) ? componentesResp.data : [];
 
-        let maquinasFiltradas;
+        let equiposFiltrados: Equipo[];
+        let areasFiltradas: Area[];
         if (mostrarTodos) {
-          maquinasFiltradas = equipos
-            .filter(e => e.estado === 'A')
-            .map(e => ({ id: e.nombre_equipo, name: e.nombre_equipo }));
+          equiposFiltrados = allEquipos.filter(e => e.estado === 'A');
+          areasFiltradas = allAreas.filter(a => a.estado === 'A');
         } else {
           const localidad = typeof window !== 'undefined' ? sessionStorage.getItem('usuario_localidad') : null;
           const regional = localidad === 'GYE' ? 2000 : 1000;
           const codigosAreaRegional = new Set(
-            areas
+            allAreas
               .filter(a => Number(a.regional) === regional && a.estado === 'A')
               .map(a => String(a.codigo_area))
           );
-          maquinasFiltradas = equipos
-            .filter(e => codigosAreaRegional.has(String(e.codigo_area)) && e.estado === 'A')
-            .map(e => ({ id: e.nombre_equipo, name: e.nombre_equipo }));
+          equiposFiltrados = allEquipos.filter(e => codigosAreaRegional.has(String(e.codigo_area)) && e.estado === 'A');
+          areasFiltradas = allAreas.filter(a => codigosAreaRegional.has(String(a.codigo_area)));
         }
 
-        setMachineList(maquinasFiltradas);
+        // Solo máquinas que realmente tengan componentes con datos analíticos
+        // (si la máquina no está siendo medida por sensores, no debe aparecer
+        // para elegir en este wizard — confirmado con mantenimiento) Y que además
+        // tengan al menos un componente que NO admita registro manual (los
+        // componentes de registro manual no se miden por sensor, así que no
+        // corresponden a este dashboard predictivo).
+        const equiposConDatos = await Promise.all(
+          equiposFiltrados.map(async (e) => {
+            try {
+              const resp = await calculosCorrientesDatosMantenimientoService.getComponentsByMachine({ maquina: e.nombre_equipo });
+              const nombresConDatos: string[] = Array.isArray(resp?.data)
+                ? resp.data.filter((c: any) => c.COMPONENTE).map((c: any) => normalizeCompName(c.COMPONENTE.toString()))
+                : [];
+              if (nombresConDatos.length === 0) return null;
+
+              const componentesDelEquipo = allComponentes.filter(c => c.codigo_equipo === e.codigo_equipo);
+              const tieneComponenteSensor = nombresConDatos.some(nombreDatos => {
+                const match = componentesDelEquipo.find(c => normalizeCompName(c.nombre_componente) === nombreDatos);
+                // Si no hay un registro correspondiente en el maestro de componentes,
+                // se asume que sí es de sensor (no hay forma de confirmar que es manual).
+                return !match || match.admite_registros_manuales !== true;
+              });
+              return tieneComponenteSensor ? e : null;
+            } catch {
+              return null;
+            }
+          })
+        );
+        equiposFiltrados = equiposConDatos.filter((e): e is Equipo => e !== null);
+
+        // Solo áreas que efectivamente tengan al menos un equipo disponible (con datos)
+        areasFiltradas = areasFiltradas.filter(a => equiposFiltrados.some(e => String(e.codigo_area) === String(a.codigo_area)));
+
+        setEquipos(equiposFiltrados);
+        setAreas(areasFiltradas);
+        setComponentes(allComponentes);
       } catch (error) {
         console.error("Error fetching initial data:", error);
-        setMachineList([]);
+        setEquipos([]);
+        setAreas([]);
         toast({
             variant: "destructive",
             title: "Error de Conexión",
@@ -157,14 +220,40 @@ function DashboardContent() {
     fetchInitialData();
   }, [toast]);
 
-  // 2. Definición de IDs
+  // 2. Definición de IDs (machineId se valida contra TODOS los equipos disponibles,
+  // no solo los del área elegida, para poder saltar el wizard si ya viene en la URL)
   const machineId = (
-    typeof searchParams.get('machine') === 'string' && machineList.some(m => m.id === searchParams.get('machine'))
+    typeof searchParams.get('machine') === 'string' && equipos.some(e => e.nombre_equipo === searchParams.get('machine'))
       ? searchParams.get('machine')
       : undefined
   ) as MachineId | undefined;
 
   const componentId = typeof searchParams.get('component') === 'string' ? searchParams.get('component') : undefined;
+
+  // Lista de máquinas del área seleccionada (para el Paso 2)
+  const machineList: Machine[] = useMemo(
+    () => equipos.filter(e => String(e.codigo_area) === selectedArea).map(e => ({ id: e.nombre_equipo, name: e.nombre_equipo })),
+    [equipos, selectedArea]
+  );
+
+  // Si ya hay una máquina válida en la URL, deducir a qué área pertenece (para poder saltar el wizard)
+  useEffect(() => {
+    if (machineId && !selectedArea) {
+      const eq = equipos.find(e => e.nombre_equipo === machineId);
+      if (eq) setSelectedArea(String(eq.codigo_area));
+    }
+  }, [machineId, equipos, selectedArea]);
+
+  // Decide si hay que mostrar el wizard o saltar directo al dashboard (URL ya con machine+component válidos)
+  useEffect(() => {
+    if (stepperInitialized || loading) return;
+    if (!machineId) { setStepperInitialized(true); return; }
+    if (componentsLoading) return;
+    if (componentId && componentList.some(c => c.id === componentId)) {
+      setCurrentStep(6);
+    }
+    setStepperInitialized(true);
+  }, [stepperInitialized, loading, machineId, componentId, componentsLoading, componentList]);
 
   // 3. Parseo de Fechas
   const fromDateString = searchParams.get('from');
@@ -213,6 +302,7 @@ function DashboardContent() {
         setComponentList([]);
         return;
       };
+      setComponentsLoading(true);
       try {
         const response = await calculosCorrientesDatosMantenimientoService.getComponentsByMachine({ maquina: machineId });
         if (response.data && Array.isArray(response.data)) {
@@ -231,7 +321,16 @@ function DashboardContent() {
               };
             });
 
-          const uniqueComponents = Array.from(new Map(transformedComponents.map(c => [c.id, c])).values());
+          // Excluir componentes que admiten registro manual: no se miden por
+          // sensor, así que no corresponden a este dashboard predictivo.
+          const equipoActual = equipos.find(e => e.nombre_equipo === machineId);
+          const componentesDelEquipo = equipoActual ? componentes.filter(c => c.codigo_equipo === equipoActual.codigo_equipo) : [];
+          const soloSensores = transformedComponents.filter(c => {
+            const match = componentesDelEquipo.find(cc => normalizeCompName(cc.nombre_componente) === normalizeCompName(c.originalName));
+            return !match || match.admite_registros_manuales !== true;
+          });
+
+          const uniqueComponents = Array.from(new Map(soloSensores.map(c => [c.id, c])).values());
           setComponentList(uniqueComponents);
         } else {
           console.error("Formato de respuesta inesperado para componentes:", response);
@@ -240,10 +339,12 @@ function DashboardContent() {
       } catch (error) {
         console.error("Error fetching components:", error);
         setComponentList([]);
+      } finally {
+        setComponentsLoading(false);
       }
     }
     fetchComponents();
-  }, [machineId]);
+  }, [machineId, equipos, componentes]);
   
   // 6. Carga de datos
   useEffect(() => {
@@ -282,6 +383,16 @@ function DashboardContent() {
           projectionDays,
           (partialData, progress) => {
             setLoadingProgress(progress);
+            // Se va pintando el gráfico a medida que llegan las páginas de la
+            // API (en vez de esperar a que terminen todas). Los datos reales
+            // aparecen de a poco; la tendencia/proyección se agrega recién al
+            // final, cuando ya se tienen todas las páginas.
+            if (partialData.length > 0) {
+              setCachedData(prev => ({
+                ...prev,
+                [currentCacheKey]: { data: aggregateDataByDateTime(partialData), aggregationLevel: 'hour' },
+              }));
+            }
           }
         );
         
@@ -343,113 +454,253 @@ function DashboardContent() {
   }
 
   const selectedComponent = componentId ? componentList.find(c => c.id === componentId) : undefined;
-  const machine = machineList.find(m => m.id === machineId);
+  // Buscar la máquina directamente en `equipos` (no en `machineList`, que ya viene filtrada por área)
+  // para que el título no dependa del timing de `selectedArea`.
+  const machine = machineId ? { id: machineId, name: machineId } as Machine : undefined;
+  const areaSeleccionadaNombre = areas.find(a => String(a.codigo_area) === selectedArea)?.nombre_area;
   const headerTitle = selectedComponent ? `${machine?.name} > ${selectedComponent.name}` : machine?.name || 'Dashboard';
-  
+
   return (
     <SidebarProvider>
       <SidebarInset className="bg-slate-50">
-        <DashboardHeader 
-          title={headerTitle} 
-          onRefresh={handleRefresh}
-          showRefreshButton={!!selectedComponent}
-        >
-          {/* Select de máquina */}
-          <div className="min-w-[200px] mr-4">
-            {/* Importar select UI arriba del archivo si no está */}
-            <Select
-              value={machineId || ""}
-              onValueChange={value => {
-                const newParams = new URLSearchParams(searchParams.toString());
-                newParams.set("machine", value);
-                newParams.delete("component");
-                router.replace(`${pathname}?${newParams.toString()}`);
-              }}
-              disabled={machineList.length === 0}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecciona una máquina" />
-              </SelectTrigger>
-              <SelectContent>
-                {machineList.map(m => (
-                  <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {/* Select de componente, solo si hay máquina seleccionada y componentes */}
-          {machineId && componentList.length > 0 && (
-            <div className="min-w-[200px] mr-4">
-                <Select
-                value={componentId || ""}
-                onValueChange={value => {
-                  const newParams = new URLSearchParams(searchParams.toString());
-                  newParams.set("component", value);
-                  router.replace(`${pathname}?${newParams.toString()}`);
-                }}
-                disabled={componentList.length === 0}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona un componente" />
-                </SelectTrigger>
-                <SelectContent>
-                  {componentList.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          <div className="min-w-[140px] mr-4">
-            <Select
-              value={String(predictionDays)}
-              onValueChange={value => setPredictionDays(Number(value))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Días predicción" />
-              </SelectTrigger>
-              <SelectContent>
-                {[5,10,15,30,45,60].map(d => (
-                  <SelectItem key={d} value={String(d)}>{d} días</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <DateRangePicker initialDate={displayRange} />
-        </DashboardHeader>
+        {currentStep === 6 ? (
+          <DashboardHeader title={headerTitle} onRefresh={handleRefresh} showRefreshButton={!!selectedComponent} />
+        ) : (
+          <DashboardHeader title="Configura tu vista" />
+        )}
         <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
-          {!selectedComponent || !machineId || !displayRange ? (
-            <EmptyState />
-          ) : noDataAvailable && !chartLoading ? (
-            <NoDataState />
-          ) : chartLoading && chartData.length === 0 ? (
-            <LoadingState progress={loadingProgress} />
-          ) : (
-            <div className="relative">
-              {chartLoading && chartData.length > 0 && (
-                <div className="absolute top-0 left-0 right-0 z-10 bg-slate-50/80 backdrop-blur-sm h-full flex items-center justify-center">
-                    <div className="text-center">
-                          <Loader className="mx-auto h-12 w-12 animate-spin text-primary" />
-                          <p className="mt-2 text-sm font-semibold text-slate-600">Recalculando Proyección...</p>
+            {/* Barra de pasos */}
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {DASHBOARD_STEPS.map((step, idx) => (
+                    <div key={step.number} className="flex items-center shrink-0">
+                      <button
+                        type="button"
+                        disabled={step.number >= currentStep}
+                        onClick={() => { if (step.number < currentStep) setCurrentStep(step.number); }}
+                        className={`flex items-center gap-2 ${step.number < currentStep ? 'cursor-pointer' : 'cursor-default'}`}
+                      >
+                        <span
+                          className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 transition-colors ${
+                            currentStep === step.number
+                              ? 'bg-blue-600 text-white'
+                              : currentStep > step.number
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-gray-200 text-gray-500'
+                          }`}
+                        >
+                          {currentStep > step.number ? '✓' : step.number}
+                        </span>
+                        <span
+                          className={`text-sm font-medium whitespace-nowrap ${
+                            currentStep === step.number ? 'text-blue-700' : currentStep > step.number ? 'text-gray-700' : 'text-gray-400'
+                          }`}
+                        >
+                          {step.title}
+                        </span>
+                      </button>
+                      {idx < DASHBOARD_STEPS.length - 1 && (
+                        <div className={`h-0.5 w-8 sm:w-12 mx-2 shrink-0 ${currentStep > step.number ? 'bg-blue-400' : 'bg-gray-200'}`} />
+                      )}
                     </div>
+                  ))}
                 </div>
-              )}
-              <div className={chartLoading ? "opacity-30" : ""}>
-                <DashboardClient
-                  key={currentCacheKey || 'dashboard-client'} 
-                  machineComponents={selectedComponent ? [selectedComponent] : []}
-                  data={chartData}
-                  aggregationLevel={aggregationLevel}
-                  machine={machineId}
-                  predictionDays={predictionDays}
-                />
+              </CardContent>
+            </Card>
+
+            {/* Paso 1: Área */}
+            {currentStep === 1 && (
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">Selecciona un Área</h2>
+                  <p className="text-sm text-gray-500 mt-1">Elegí el área para continuar</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {areas.map(a => (
+                    <button
+                      key={a.codigo_area}
+                      onClick={() => { setSelectedArea(String(a.codigo_area)); setCurrentStep(2); }}
+                      className={`p-6 rounded-2xl border-2 text-left transition-all hover:border-blue-400 hover:shadow-lg ${
+                        selectedArea === String(a.codigo_area) ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
+                      }`}
+                    >
+                      <p className="font-bold text-gray-800">{a.nombre_area}</p>
+                    </button>
+                  ))}
+                  {areas.length === 0 && <p className="text-gray-500 col-span-full">No hay áreas disponibles.</p>}
+                </div>
               </div>
-            </div>
-          )}
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
-  );
+            )}
+
+            {/* Paso 2: Máquina */}
+            {currentStep === 2 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-800">Selecciona una Máquina</h2>
+                    <p className="text-sm text-gray-500 mt-1">Máquinas de {areaSeleccionadaNombre}</p>
+                  </div>
+                  <button onClick={() => setCurrentStep(1)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors shrink-0">
+                    <ChevronLeft className="w-4 h-4" /> Atrás
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {machineList.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        // Se lee window.location.search (siempre al día) en vez del searchParams
+                        // de React, que puede quedar un paso atrás si el usuario avanza rápido
+                        // entre pasos y todavía no se propagó la navegación anterior.
+                        const newParams = new URLSearchParams(window.location.search);
+                        newParams.set("machine", m.id);
+                        newParams.delete("component");
+                        router.replace(`${pathname}?${newParams.toString()}`);
+                        setCurrentStep(3);
+                      }}
+                      className={`p-6 rounded-2xl border-2 text-left transition-all hover:border-blue-400 hover:shadow-lg ${
+                        machineId === m.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
+                      }`}
+                    >
+                      <p className="font-bold text-gray-800">{m.name}</p>
+                    </button>
+                  ))}
+                  {machineList.length === 0 && <p className="text-gray-500 col-span-full">No hay máquinas disponibles en esta área.</p>}
+                </div>
+              </div>
+            )}
+
+            {/* Paso 3: Componente */}
+            {currentStep === 3 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-800">Selecciona un Componente</h2>
+                    <p className="text-sm text-gray-500 mt-1">Componentes de {machineId}</p>
+                  </div>
+                  <button onClick={() => setCurrentStep(2)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors shrink-0">
+                    <ChevronLeft className="w-4 h-4" /> Atrás
+                  </button>
+                </div>
+                {componentsLoading ? (
+                  <p className="text-gray-500">Cargando componentes...</p>
+                ) : componentList.length === 0 ? (
+                  <p className="text-gray-500">No hay componentes disponibles para esta máquina.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {componentList.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => {
+                          const newParams = new URLSearchParams(window.location.search);
+                          newParams.set("component", c.id);
+                          router.replace(`${pathname}?${newParams.toString()}`);
+                          setCurrentStep(4);
+                        }}
+                        className={`p-6 rounded-2xl border-2 text-left transition-all hover:border-blue-400 hover:shadow-lg ${
+                          componentId === c.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
+                        }`}
+                      >
+                        <p className="font-bold text-gray-800">{c.name}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Paso 4: Días de Predicción */}
+            {currentStep === 4 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-800">Días de Predicción</h2>
+                    <p className="text-sm text-gray-500 mt-1 max-w-xl">
+                      Cuántos días hacia adelante se proyecta la tendencia de falla, según el comportamiento histórico reciente del componente.
+                    </p>
+                  </div>
+                  <button onClick={() => setCurrentStep(3)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors shrink-0">
+                    <ChevronLeft className="w-4 h-4" /> Atrás
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {PREDICTION_DAYS_OPTIONS.map(d => (
+                    <button
+                      key={d}
+                      onClick={() => { setPredictionDays(d); setCurrentStep(5); }}
+                      className={`px-5 py-2.5 rounded-full border-2 font-semibold text-sm transition-all ${
+                        predictionDays === d ? 'border-blue-500 bg-blue-500 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300'
+                      }`}
+                    >
+                      {d} días
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Paso 5: Calendario */}
+            {currentStep === 5 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-800">Rango de Fechas</h2>
+                    <p className="text-sm text-gray-500 mt-1">Elegí el período de datos que querés analizar (por defecto, los últimos 30 días).</p>
+                  </div>
+                  <button onClick={() => setCurrentStep(4)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors shrink-0">
+                    <ChevronLeft className="w-4 h-4" /> Atrás
+                  </button>
+                </div>
+                <DateRangePicker initialDate={displayRange} />
+                <div>
+                  <Button onClick={() => setCurrentStep(6)}>Ver Dashboard</Button>
+                </div>
+              </div>
+            )}
+
+            {/* Paso 6: Gráfica */}
+            {currentStep === 6 && (
+              <>
+                <div>
+                  <button onClick={() => setCurrentStep(5)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm transition-colors">
+                    <ChevronLeft className="w-4 h-4" /> Atrás
+                  </button>
+                </div>
+                {!selectedComponent || !machineId || !displayRange ? (
+                  <EmptyState />
+                ) : noDataAvailable && !chartLoading ? (
+                  <NoDataState />
+                ) : chartLoading && chartData.length === 0 ? (
+                  <LoadingState progress={loadingProgress} />
+                ) : (
+                  <div className="relative">
+                    {chartLoading && chartData.length > 0 && (
+                      <div className="absolute top-0 left-0 right-0 z-10 bg-slate-50/80 backdrop-blur-sm h-full flex items-center justify-center">
+                          <div className="text-center">
+                                <Loader className="mx-auto h-12 w-12 animate-spin text-primary" />
+                                <p className="mt-2 text-sm font-semibold text-slate-600">Recalculando Proyección...</p>
+                          </div>
+                      </div>
+                    )}
+                    <div className={chartLoading ? "opacity-30" : ""}>
+                      <DashboardClient
+                        key={currentCacheKey || 'dashboard-client'}
+                        machineComponents={selectedComponent ? [selectedComponent] : []}
+                        data={chartData}
+                        aggregationLevel={aggregationLevel}
+                        machine={machineId}
+                        predictionDays={predictionDays}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    );
 }
 
 export default function DashboardPage() {

@@ -29,9 +29,11 @@ import EventFlowModal from "@/app/dashboard/historial/components/event-flow-moda
 import { useToast } from "@/hooks/use-toast";
 import { equipoService } from "@/services/equipo.service";
 import { componenteService } from "@/services/componente.service";
+import { areaService } from "@/services/area.service";
 import { historialService } from "@/services/historial.service";
 import { categoriaEventoService } from "@/services/categoriaEvento.service";
 import type { Equipo, Componente, Historial, CategoriaEvento } from "@/types/interfaces";
+import { useRegionalScope, filterAreasByRegional } from "@/hooks/use-regional-scope";
 
 type HistorialResponse = Omit<Historial, 'descripcion_evento'> & {
   descripcion_evento?: string;
@@ -58,17 +60,31 @@ export function HistorialClient() {
   const [selectedHistorialEntry, setSelectedHistorialEntry] = useState<HistorialResponse | null>(null);
   const [modalMode, setModalMode] = useState<'flow' | 'trace'>('flow');
   const { toast } = useToast();
+  const { regional, mostrarTodos, loading: loadingRegionalScope } = useRegionalScope();
 
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Cargar equipos al montar el componente
+  // Cargar equipos (filtrados por la regional del usuario) al montar el componente
   useEffect(() => {
+    if (loadingRegionalScope) return;
+
     const fetchEquipos = async () => {
       try {
         setLoadingEquipos(true);
-        const response = await equipoService.getAll();
-        setEquipos(response.data || []);
+        const [equiposResp, areasResp] = await Promise.all([
+          equipoService.getAll(),
+          areaService.getAll(),
+        ]);
+        const todosEquipos = equiposResp.data || [];
+        const todasAreas = areasResp.data || [];
+        if (mostrarTodos) {
+          setEquipos(todosEquipos);
+        } else {
+          const areasEnRegional = filterAreasByRegional(todasAreas, regional, mostrarTodos);
+          const codigosAreaRegional = new Set(areasEnRegional.map(a => String(a.codigo_area)));
+          setEquipos(todosEquipos.filter(e => codigosAreaRegional.has(String(e.codigo_area))));
+        }
         setError(null);
       } catch (err) {
         setError("Error al cargar equipos");
@@ -79,7 +95,7 @@ export function HistorialClient() {
     };
 
     fetchEquipos();
-  }, []);
+  }, [loadingRegionalScope, mostrarTodos, regional]);
 
   // Cargar componentes cuando se selecciona un equipo
   useEffect(() => {

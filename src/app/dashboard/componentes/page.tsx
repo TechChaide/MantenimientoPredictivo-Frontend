@@ -6,13 +6,16 @@ import LimitesModal from "@/components/dashboard/limites-modal";
 import LimitesManualModal from "@/components/dashboard/limites-manual-modal";
 import { componenteService } from "@/services/componente.service";
 import { equipoService } from "@/services/equipo.service";
-import type { Componente, Equipo } from "@/types/interfaces";
+import { areaService } from "@/services/area.service";
+import type { Componente, Equipo, Area } from "@/types/interfaces";
+import { useRegionalScope, filterAreasByRegional } from "@/hooks/use-regional-scope";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { AlertTriangle, Loader2, Plus, Save, RefreshCw, Trash2, X, Flag, EllipsisVertical } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -26,12 +29,15 @@ const emptyComponente: Componente = {
   codigo_componente: 0 as any, // 0 para inserción
   codigo_equipo: "",
   nombre_componente: "",
+  admite_registros_manuales: false,
   estado: "A",
 };
 
 export default function ComponentePage() {
   const [items, setItems] = useState<Componente[]>([]);
   const [equipos, setEquipos] = useState<Equipo[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const { regional, mostrarTodos } = useRegionalScope();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -74,19 +80,41 @@ export default function ComponentePage() {
         console.error("Error cargando equipos", e);
       }
     };
+    const loadAreas = async () => {
+      try {
+        const resp = await areaService.getAll();
+        setAreas(Array.isArray(resp.data) ? resp.data : []);
+      } catch (e: any) {
+        console.error("Error cargando áreas", e);
+      }
+    };
     loadEquipos();
+    loadAreas();
   }, []);
 
+  const equiposEnRegional = useMemo(() => {
+    if (mostrarTodos) return equipos;
+    const areasEnRegional = filterAreasByRegional(areas, regional, mostrarTodos);
+    const codigosAreaRegional = new Set(areasEnRegional.map(a => String(a.codigo_area)));
+    return equipos.filter(e => codigosAreaRegional.has(String(e.codigo_area)));
+  }, [equipos, areas, regional, mostrarTodos]);
+
+  const itemsEnRegional = useMemo(() => {
+    if (mostrarTodos) return items;
+    const codigosEquipoRegional = new Set(equiposEnRegional.map(e => String(e.codigo_equipo)));
+    return items.filter(it => codigosEquipoRegional.has(String(it.codigo_equipo)));
+  }, [items, equiposEnRegional, mostrarTodos]);
+
   const filtered = useMemo(() => {
-    if (!filter) return items;
+    if (!filter) return itemsEnRegional;
     const f = filter.toLowerCase();
-    return items.filter(it =>
+    return itemsEnRegional.filter(it =>
       String(it.codigo_componente ?? '').toLowerCase().includes(f) ||
       String(it.codigo_equipo ?? '').toLowerCase().includes(f) ||
       String(it.nombre_componente ?? '').toLowerCase().includes(f) ||
       String(it.estado ?? '').toLowerCase().includes(f)
     );
-  }, [items, filter]);
+  }, [itemsEnRegional, filter]);
 
   const paginatedItems = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
@@ -100,7 +128,7 @@ export default function ComponentePage() {
   const startEdit = (c: Componente) => setForm({ mode: "edit", data: { ...c } });
   const cancelEdit = () => startNew();
 
-  const onChangeField = (field: keyof Componente, value: string) => {
+  const onChangeField = (field: keyof Componente, value: string | boolean) => {
     setForm(prev => ({ ...prev, data: { ...prev.data, [field]: value } }));
   };
 
@@ -113,9 +141,13 @@ export default function ComponentePage() {
     try {
       const payload: Componente = {
         codigo_componente: form.mode === "edit" ? String(form.data.codigo_componente ?? "") : "0",
-        codigo_equipo: (form.data.codigo_equipo || "").trim(),
-        nombre_componente: (form.data.nombre_componente || "").trim(),
-        estado: (form.data.estado || "A").trim(),
+        codigo_equipo: String(form.data.codigo_equipo ?? "").trim(),
+        nombre_componente: String(form.data.nombre_componente ?? "").trim(),
+        // NOTA: el backend todavía no tiene una columna propia para esto en
+        // `componente` (hoy solo existe en `equipo`) — se envía igual para
+        // que empiece a guardarse en cuanto esa columna exista.
+        admite_registros_manuales: form.data.admite_registros_manuales ?? false,
+        estado: String(form.data.estado ?? "A").trim(),
       };
       const respSaved = await componenteService.save(payload);
       const saved = respSaved.data;
@@ -201,7 +233,7 @@ export default function ComponentePage() {
                       <SelectValue placeholder="Seleccione un equipo" />
                     </SelectTrigger>
                     <SelectContent>
-                      {equipos.map(equipo => (
+                      {equiposEnRegional.map(equipo => (
                         <SelectItem key={equipo.codigo_equipo} value={String(equipo.codigo_equipo)}>
                           {equipo.nombre_equipo}
                         </SelectItem>
@@ -219,6 +251,14 @@ export default function ComponentePage() {
                     <option value="A">Activo</option>
                     <option value="I">Inactivo</option>
                   </select>
+                </div>
+                <div className="mb-2 flex items-center justify-between">
+                  <Label htmlFor="admite_registros_manuales">Admite Registros Manuales</Label>
+                  <Switch
+                    id="admite_registros_manuales"
+                    checked={form.data.admite_registros_manuales ?? false}
+                    onCheckedChange={(checked) => onChangeField('admite_registros_manuales', checked)}
+                  />
                 </div>
                 <div className="flex gap-2 pt-2">
                   <Button type="submit" className={form.mode === 'edit' ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'} disabled={!canSave() || saving}>
@@ -241,7 +281,7 @@ export default function ComponentePage() {
                   <th className="text-left px-3 py-2">Equipo</th>
                   <th className="text-left px-3 py-2">Nombre</th>
                   <th className="text-left px-3 py-2">Estado</th>
-                  <th className="text-left px-3 py-2">Registros Manuales</th>
+                  <th className="text-left px-3 py-2">Registro Manual</th>
                   <th className="px-3 py-2 text-center w-32">Acciones</th>
                 </tr>
               </thead>
@@ -266,16 +306,13 @@ export default function ComponentePage() {
                       </span>
                     </td>
                     <td className="px-3 py-2 align-middle">
-                      {(() => {
-                        const equipo = equipos.find(e => e.codigo_equipo === comp.codigo_equipo);
-                        return (
-                          <span className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold ${
-                            equipo?.admite_registros_manuales ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                          }`}>
-                            {equipo?.admite_registros_manuales ? 'Sí' : 'No'}
-                          </span>
-                        );
-                      })()}
+                      <span
+                        className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold ${
+                          comp.admite_registros_manuales ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                        }`}
+                      >
+                        {comp.admite_registros_manuales ? 'Sí' : 'No'}
+                      </span>
                     </td>
                     <td className="px-3 py-1 text-center align-middle">
                       <DropdownMenu>
@@ -291,11 +328,10 @@ export default function ComponentePage() {
                           <DropdownMenuItem onClick={() => { setModalComponenteId(String(comp.codigo_componente)); setModalComponenteName(comp.nombre_componente); setShowReferenciasModal(true); }}>
                             📎 Referencias
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => { 
-                            const equipo = equipos.find(e => e.codigo_equipo === comp.codigo_equipo);
-                            setModalComponenteId(String(comp.codigo_componente)); 
+                          <DropdownMenuItem onClick={() => {
+                            setModalComponenteId(String(comp.codigo_componente));
                             setModalComponenteName(comp.nombre_componente);
-                            if (equipo?.admite_registros_manuales) {
+                            if (comp.admite_registros_manuales) {
                               setShowLimitesManualModal(true);
                             } else {
                               setShowLimitesModal(true);

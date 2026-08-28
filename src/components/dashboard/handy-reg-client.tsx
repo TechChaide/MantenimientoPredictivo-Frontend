@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, Loader2, Save, Plus, Trash2, ChevronRight, ChevronLeft, Search, Play, Square, CheckCircle, ChevronsLeft, ChevronsRight, Activity, Thermometer } from "lucide-react";
+import { AlertTriangle, Loader2, Save, Plus, Trash2, ChevronRight, ChevronLeft, Search, Play, Square, CheckCircle, ChevronsLeft, ChevronsRight, Activity, Thermometer, Lock } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -130,6 +130,17 @@ type MedicionVibracion = {
 
 type TipoMedicion = 'vibracion' | 'temperatura';
 
+const TEMPERATURA_UNIDAD_FIJA = "°C";
+const TEMPERATURA_MEDICIONES_DEFAULT = 11;
+
+const crearMedicionesTemperaturaDefault = (): Medicion[] =>
+  Array.from({ length: TEMPERATURA_MEDICIONES_DEFAULT }, (_, idx) => ({
+    id: String(idx + 1),
+    numero: idx + 1,
+    valor: "",
+    unidades: TEMPERATURA_UNIDAD_FIJA,
+  }));
+
 const crearMedicionVibracion = (numero: number): MedicionVibracion => ({
   id: String(numero),
   numero,
@@ -140,7 +151,7 @@ const crearMedicionVibracion = (numero: number): MedicionVibracion => ({
   axial: [{ id: `a1_${numero}`, valor: "", unidades: "" }, { id: `a2_${numero}`, valor: "", unidades: "" }],
 });
 
-type StepperStep = 1 | 2;
+type StepperStep = 1 | 2 | 3 | 4;
 
 export function HandyRegClient() {
   const [currentStep, setCurrentStep] = useState<StepperStep>(1);
@@ -339,8 +350,24 @@ export function HandyRegClient() {
 
   // Función para obtener registros paginados (uno por fila)
   const obtenerRegistrosPaginados = () => {
+    // Restringir el historial a componentes de equipos de la regional del usuario
+    // (salvo que el usuario esté en la lista blanca MOSTRAR_TODOS_EQUIPOS)
+    const equiposEnRegionalSet = new Set(
+      equipos
+        .filter((e) => mostrarTodosEquipos || codigosAreaRegional.has(String(e.codigo_area)))
+        .map((e) => String(e.codigo_equipo))
+    );
+    const registrosEnRegional = mostrarTodosEquipos
+      ? registrosHistorico
+      : registrosHistorico.filter((registro) => {
+          const componente = componentes.find(
+            (c) => c.codigo_componente === registro.codigo_componente
+          );
+          return componente ? equiposEnRegionalSet.has(String(componente.codigo_equipo)) : false;
+        });
+
     // Ordenar registros por fecha de evento (descendente)
-    const registrosOrdenados = [...registrosHistorico].sort((a, b) => {
+    const registrosOrdenados = [...registrosEnRegional].sort((a, b) => {
       const fechaA = new Date(a.fecha_evento || a.fecha_creacion).getTime();
       const fechaB = new Date(b.fecha_evento || b.fecha_creacion).getTime();
       return fechaB - fechaA;
@@ -360,9 +387,10 @@ export function HandyRegClient() {
     };
   };
 
-  // Filtrar componentes por equipo seleccionado
+  // Filtrar componentes por equipo seleccionado: solo los que admiten registro manual
+  // (en Registros Manuales no tiene sentido ofrecer un componente medido por sensor)
   const componentesFiltrados = selectedEquipo
-    ? componentes.filter((c) => c.codigo_equipo === selectedEquipo)
+    ? componentes.filter((c) => c.codigo_equipo === selectedEquipo && c.admite_registros_manuales === true)
     : [];
 
   // Regional del usuario en sesión (UIO -> 1000, GYE -> 2000)
@@ -376,10 +404,15 @@ export function HandyRegClient() {
       .map(a => String(a.codigo_area))
   );
 
-  // Filtrar equipos que admiten registros manuales Y pertenecen a la regional del usuario
-  // (si mostrarTodosEquipos, se omite el filtro regional)
+  // Un equipo se ofrece en Registros Manuales si AL MENOS UNO de sus componentes
+  // admite registro manual (el flag es por componente, no por equipo completo)
+  const equipoTieneComponenteManual = (codigoEquipo: string) =>
+    componentes.some((c) => c.codigo_equipo === codigoEquipo && c.admite_registros_manuales === true);
+
+  // Filtrar equipos que tienen al menos un componente que admite registros manuales
+  // Y pertenecen a la regional del usuario (si mostrarTodosEquipos, se omite el filtro regional)
   const equiposFiltrados = equipos.filter(
-    (e) => e.admite_registros_manuales === true &&
+    (e) => equipoTieneComponenteManual(e.codigo_equipo) &&
       (mostrarTodosEquipos || codigosAreaRegional.has(String(e.codigo_area)))
   );
 
@@ -452,7 +485,8 @@ export function HandyRegClient() {
       tarea.COMPONENTE.toLowerCase().includes(searchLower) ||
       tarea.TIPO_MTO.toLowerCase().includes(searchLower) ||
       (tarea.TECNICO && tarea.TECNICO.toLowerCase().includes(searchLower)) ||
-      String(tarea.OT_PRG).includes(searchLower)
+      otProgramada.toLowerCase().includes(searchLower) ||
+      (tarea.OT_ULT !== null && tarea.OT_ULT !== undefined && String(tarea.OT_ULT).toLowerCase().includes(searchLower))
     );
   });
 
@@ -463,7 +497,7 @@ export function HandyRegClient() {
       id: newId,
       numero: mediciones.length + 1,
       valor: "",
-      unidades: mediciones[0]?.unidades || "",
+      unidades: TEMPERATURA_UNIDAD_FIJA,
     };
     setMediciones([...mediciones, newMedicion]);
   };
@@ -499,6 +533,12 @@ export function HandyRegClient() {
       sanitized = String(value).toUpperCase().replace(/[^A-Z]/g, "");
     } else if (field === "numero") {
       sanitized = parseInt(String(value)) || 0;
+    } else if (field === "valor") {
+      // Solo dígitos y un separador decimal (coma o punto, normalizado a punto)
+      let v = String(value).replace(/[^0-9.,]/g, "").replace(",", ".");
+      const partes = v.split(".");
+      if (partes.length > 2) v = partes[0] + "." + partes.slice(1).join("");
+      sanitized = v;
     }
     setMediciones(
       mediciones.map((m) =>
@@ -552,7 +592,10 @@ export function HandyRegClient() {
     entradaId: string,
     valor: string
   ) => {
-    const valorNormalizado = valor.replace(/,/g, ".");
+    // Solo dígitos y un separador decimal (coma o punto, normalizado a punto)
+    let valorNormalizado = valor.replace(/[^0-9.,]/g, "").replace(",", ".");
+    const partesValor = valorNormalizado.split(".");
+    if (partesValor.length > 2) valorNormalizado = partesValor[0] + "." + partesValor.slice(1).join("");
     setMedicionesVibracion(
       medicionesVibracion.map((m) => {
         if (m.id !== medicionId) return m;
@@ -749,12 +792,28 @@ export function HandyRegClient() {
     setCurrentStep(2);
   };
 
-  const handlePrevStep = () => {
-    setCurrentStep(1);
+  const handleNextStepOT = () => {
+    if (!selectedTarea) {
+      setError("Debes seleccionar una tarea programada");
+      return;
+    }
     setError(null);
-    setSelectedTarea(null);
-    setSearchTerm("");
-    setOt("");
+    setCurrentStep(3);
+  };
+
+  const handlePrevStep = () => {
+    setError(null);
+    if (currentStep === 2) {
+      setCurrentStep(1);
+      setSelectedTarea(null);
+      setSearchTerm("");
+      setOt("");
+    } else if (currentStep === 3) {
+      setCurrentStep(2);
+    } else if (currentStep === 4) {
+      if (trabajoIniciado) return;
+      setCurrentStep(3);
+    }
   };
 
   const handleIniciarTrabajo = () => {
@@ -1154,15 +1213,25 @@ export function HandyRegClient() {
     },
     {
       number: 2,
-      title: "Mediciones",
-      description: "Registra mediciones",
+      title: "Orden de Trabajo",
+      description: "Selecciona la OT",
+    },
+    {
+      number: 3,
+      title: "Tipo de Registro",
+      description: "Vibración o Temperatura",
+    },
+    {
+      number: 4,
+      title: "Registro de Datos",
+      description: "Ingresa las mediciones",
     },
   ];
 
   // Vista de Historial de Registros
   if (registrosHistorico.length > 0 && !showFormulario) {
     return (
-      <div className="p-8 bg-gray-50 min-h-screen">
+      <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
         <div className="max-w-7xl mx-auto">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -1365,14 +1434,14 @@ export function HandyRegClient() {
   // PASO 1: Seleccionar Equipo y Componente (o mostrar formulario si no hay registros)
   if (currentStep === 1) {
     return (
-      <div className="flex gap-0 min-h-screen">
+      <div className="flex flex-col md:flex-row gap-0 min-h-screen">
         {/* Stepper Lateral */}
-        <div className="sticky top-0 h-screen w-80 bg-white border-r border-gray-200 p-8 flex flex-col">
-          <h2 className="text-2xl font-bold mb-8">Registrar Evento</h2>
-          
-          <div className="flex-1">
+        <div className="w-full md:sticky md:top-0 md:h-screen md:w-80 bg-white border-b md:border-b-0 md:border-r border-gray-200 p-4 md:p-8 flex flex-row md:flex-col items-center md:items-stretch gap-4 md:gap-0 overflow-x-auto md:overflow-visible">
+          <h2 className="hidden md:block text-2xl font-bold mb-8 shrink-0">Registrar Evento</h2>
+
+          <div className="flex flex-row md:flex-col flex-1 gap-4 md:gap-0">
             {steps.map((step, idx) => (
-              <div key={step.number} className="flex flex-col">
+              <div key={step.number} className="flex flex-col shrink-0">
                 {/* Círculo del paso */}
                 <div className="flex items-start gap-4">
                   {/* Círculo numerado */}
@@ -1389,7 +1458,7 @@ export function HandyRegClient() {
                     {/* Línea conectora */}
                     {idx < steps.length - 1 && (
                       <div
-                        className={`w-1 h-16 mt-2 ${
+                        className={`hidden md:block w-1 h-16 mt-2 ${
                           currentStep > step.number
                             ? "bg-blue-500"
                             : "bg-gray-300"
@@ -1411,7 +1480,7 @@ export function HandyRegClient() {
                     >
                       {step.title}
                     </p>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="hidden md:block text-xs text-gray-500 mt-1">
                       {step.description}
                     </p>
                   </div>
@@ -1422,7 +1491,7 @@ export function HandyRegClient() {
         </div>
 
         {/* Contenido Principal */}
-        <div className="flex-1 bg-gray-50 p-8 overflow-auto">
+        <div className="flex-1 bg-gray-50 p-4 md:p-8 overflow-auto">
           <div className="w-full">
             <Card>
               <CardHeader>
@@ -1610,14 +1679,14 @@ export function HandyRegClient() {
 
   // PASO 2: Tabla de Mediciones
   return (
-    <div className="flex gap-0 min-h-screen">
+    <div className="flex flex-col md:flex-row gap-0 min-h-screen">
       {/* Stepper Lateral */}
-      <div className="sticky top-0 h-screen w-80 bg-white border-r border-gray-200 p-8 flex flex-col">
-        <h2 className="text-2xl font-bold mb-8">Registrar Evento</h2>
-        
-        <div className="flex-1">
+      <div className="w-full md:sticky md:top-0 md:h-screen md:w-80 bg-white border-b md:border-b-0 md:border-r border-gray-200 p-4 md:p-8 flex flex-row md:flex-col items-center md:items-stretch gap-4 md:gap-0 overflow-x-auto md:overflow-visible">
+        <h2 className="hidden md:block text-2xl font-bold mb-8 shrink-0">Registrar Evento</h2>
+
+        <div className="flex flex-row md:flex-col flex-1 gap-4 md:gap-0">
           {steps.map((step, idx) => (
-            <div key={step.number} className="flex flex-col">
+            <div key={step.number} className="flex flex-col shrink-0">
               {/* Círculo del paso */}
               <div className="flex items-start gap-4">
                 {/* Círculo numerado */}
@@ -1634,7 +1703,7 @@ export function HandyRegClient() {
                   {/* Línea conectora */}
                   {idx < steps.length - 1 && (
                     <div
-                      className={`w-1 h-16 mt-2 ${
+                      className={`hidden md:block w-1 h-16 mt-2 ${
                         currentStep > step.number
                           ? "bg-blue-500"
                           : "bg-gray-300"
@@ -1656,7 +1725,7 @@ export function HandyRegClient() {
                   >
                     {step.title}
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="hidden md:block text-xs text-gray-500 mt-1">
                     {step.description}
                   </p>
                 </div>
@@ -1667,11 +1736,17 @@ export function HandyRegClient() {
       </div>
 
       {/* Contenido Principal */}
-      <div className="flex-1 bg-gray-50 p-8 overflow-auto">
+      <div className="flex-1 bg-gray-50 p-4 md:p-8 overflow-auto">
         <div className="w-full">
           <Card>
             <CardHeader>
-              <CardTitle>Registra Mediciones</CardTitle>
+              <CardTitle>
+                {currentStep === 2
+                  ? "Selecciona la Orden de Trabajo"
+                  : currentStep === 3
+                  ? "Selecciona el Tipo de Registro"
+                  : "Registra Mediciones"}
+              </CardTitle>
               <p className="text-sm text-gray-600 mt-2">
                 Área: <span className="font-medium">{areaSeleccionada?.nombre_area}</span> | Máquina:{" "}
                 <span className="font-medium">{equipoSeleccionado?.nombre_equipo}</span> | Componente:{" "}
@@ -1686,17 +1761,157 @@ export function HandyRegClient() {
                 </Alert>
               )}
 
-              {/* ── Selector de tipo / Panel de mediciones ── */}
-              {!tipoMedicion ? (
+              {currentStep === 4 && !trabajoIniciado && (
+                <Alert className="border-amber-300 bg-amber-50 text-amber-900">
+                  <Lock className="h-4 w-4 text-amber-600" />
+                  <AlertDescription>
+                    Los campos de esta pantalla están bloqueados. Presioná el botón <strong>▶</strong> para iniciar el trabajo y habilitar el ingreso de valores.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {currentStep === 2 && (
+                <>
+                  {/* Tareas Programadas: primero se elige la OT de trabajo */}
+                  <div className="space-y-3 w-full">
+                    <Label className="text-base font-semibold">Tareas Programadas</Label>
+                    {loadingTareas ? (
+                      <Card className="p-6 flex items-center justify-center w-full">
+                        <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
+                        <span className="text-gray-600">Cargando tareas...</span>
+                      </Card>
+                    ) : tareasSismac.length === 0 ? (
+                      <Card className="p-6 w-full">
+                        <p className="text-gray-500 text-center">No hay tareas programadas</p>
+                      </Card>
+                    ) : (
+                      <div className="space-y-3 w-full">
+                        {/* Búsqueda */}
+                        <div className="relative w-full">
+                          <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                          <Input
+                            placeholder="Buscar por OT, tarea, máquina, componente, tipo o técnico..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="pl-10"
+                            disabled={saving}
+                          />
+                        </div>
+
+                        {/* Radio Group de Tareas */}
+                        {tareasFiltradas.length === 0 ? (
+                          <Card className="p-6 w-full">
+                            <p className="text-gray-500 text-center">No hay tareas que coincidan con la búsqueda</p>
+                          </Card>
+                        ) : (
+                          <RadioGroup
+                            value={selectedTarea || ""}
+                            onValueChange={(val) => {
+                              setSelectedTarea(val);
+                              const [compKey] = val.split('__'); // Extrae la parte antes de __
+                              const tareaSeleccionada = tareasFiltradas.find(t => getTareaKey(t) === compKey);
+                              if (tareaSeleccionada) {
+                                setOt(getOtProgramada(tareaSeleccionada));
+                              }
+                            }}
+                          >
+                            <div className="space-y-2 max-h-96 overflow-y-auto w-full">
+                              {tareasFiltradas.map((tarea, idx) => {
+                                const tareaKey = getTareaKey(tarea);
+                                const uniqueKey = `${tareaKey}__${idx}`;
+                                return (
+                                  <Card
+                                    key={uniqueKey}
+                                    className={`p-4 cursor-pointer transition-all w-full ${
+                                      selectedTarea?.startsWith(tareaKey)
+                                        ? "ring-2 ring-blue-500 bg-blue-50 border-blue-200"
+                                        : "bg-blue-50 border-blue-200 hover:shadow-md"
+                                    }`}
+                                    onClick={() => {
+                                      setSelectedTarea(uniqueKey);
+                                      setOt(getOtProgramada(tarea));
+                                    }}
+                                  >
+                                    <div className="flex gap-3">
+                                      <RadioGroupItem value={uniqueKey} id={`tarea-${idx}`} className="mt-1" />
+                                      <div className="flex-1">
+                                        <label htmlFor={`tarea-${idx}`} className="cursor-pointer">
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                            <div>
+                                              <p className="font-semibold text-blue-900">{tarea.TAREA}</p>
+                                              <p className="text-gray-600">Máquina: {tarea.MAQUINA}</p>
+                                            </div>
+                                            <div>
+                                              <p className="text-gray-600">Componente: {tarea.COMPONENTE}</p>
+                                              <p className="text-gray-600">Frecuencia: {tarea.FRECUENCIA} días</p>
+                                            </div>
+                                            <div>
+                                              <p className="text-gray-600">Tipo: {tarea.TIPO_MTO}</p>
+                                              <p className="text-gray-600">Programada: {new Date(tarea.FECHA_PRO).toLocaleDateString()}</p>
+                                            </div>
+                                            <div>
+                                              <p className="text-gray-600">Técnico: {tarea.TECNICO || "No asignado"}</p>
+                                              <p className="text-gray-600">OT ULT: {tarea.OT_ULT ?? "No asignada"}</p>
+                                              <p className="text-gray-600">OT PRG: {getOtProgramada(tarea) || "No asignada"}</p>
+                                              <p className="text-gray-600">Tiempo est.: {tarea.TIEMPO} min</p>
+                                            </div>
+                                          </div>
+                                        </label>
+                                      </div>
+                                    </div>
+                                  </Card>
+                                );
+                              })}
+                            </div>
+                          </RadioGroup>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* OT y Estado */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="ot">OT</Label>
+                      <Input
+                        id="ot"
+                        type="text"
+                        placeholder="Número de OT"
+                        value={ot}
+                        onChange={(e) => setOt(e.target.value)}
+                        disabled={saving}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="estado">Estado</Label>
+                      <Select value={estado} onValueChange={setEstado} disabled={saving}>
+                        <SelectTrigger id="estado">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="A">Activo</SelectItem>
+                          <SelectItem value="I">Inactivo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* ── Selector de tipo (Paso 3) / Panel de mediciones (Paso 4) ── */}
+              {currentStep === 3 ? (
                 <div className="space-y-4">
                   <div>
                     <p className="text-base font-semibold text-gray-800">¿Qué tipo de medición vas a registrar?</p>
-                    <p className="text-sm text-gray-500 mt-1">Selecciona el tipo antes de iniciar el trabajo</p>
+                    <p className="text-sm text-gray-500 mt-1">Selecciona el tipo para continuar</p>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <button
                       type="button"
-                      onClick={() => setTipoMedicion('vibracion')}
+                      onClick={() => {
+                        setTipoMedicion('vibracion');
+                        setCurrentStep(4);
+                      }}
                       className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-gray-300 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group"
                     >
                       <div className="w-16 h-16 rounded-full bg-blue-100 group-hover:bg-blue-200 flex items-center justify-center transition-colors">
@@ -1710,7 +1925,11 @@ export function HandyRegClient() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setTipoMedicion('temperatura')}
+                      onClick={() => {
+                        setMediciones(crearMedicionesTemperaturaDefault());
+                        setTipoMedicion('temperatura');
+                        setCurrentStep(4);
+                      }}
                       className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-gray-300 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-all group"
                     >
                       <div className="w-16 h-16 rounded-full bg-orange-100 group-hover:bg-orange-200 flex items-center justify-center transition-colors">
@@ -1724,7 +1943,7 @@ export function HandyRegClient() {
                     </button>
                   </div>
                 </div>
-              ) : tipoMedicion === 'temperatura' ? (
+              ) : currentStep === 4 && tipoMedicion === 'temperatura' ? (
                 /* ── Temperatura: tabla original ── */
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -1734,7 +1953,7 @@ export function HandyRegClient() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => { if (!trabajoIniciado) setTipoMedicion(null); }}
+                      onClick={() => { if (!trabajoIniciado) { setTipoMedicion(null); setCurrentStep(3); } }}
                       disabled={trabajoIniciado}
                       className="text-xs text-gray-400 hover:text-gray-600 underline disabled:no-underline disabled:cursor-not-allowed"
                     >
@@ -1761,6 +1980,7 @@ export function HandyRegClient() {
                               <Input
                                 type="text"
                                 inputMode="decimal"
+                                pattern="[0-9]*[.,]?[0-9]*"
                                 placeholder="Requerido"
                                 value={medicion.valor}
                                 onChange={(e) => handleMedicionChange(medicion.id, "valor", e.target.value)}
@@ -1770,19 +1990,11 @@ export function HandyRegClient() {
                               />
                             </td>
                             <td className="px-4 py-3">
-                              <div className="space-y-1">
-                                <Input
-                                  type="text"
-                                  placeholder="Ej: C, F..."
-                                  value={medicion.unidades}
-                                  onChange={(e) => handleMedicionChange(medicion.id, "unidades", e.target.value)}
-                                  className="w-full"
-                                  disabled={saving || !trabajoIniciado}
-                                  required
-                                />
-                                {medicion.unidades.trim() && (
-                                  <p className="text-xs text-blue-600 font-medium">→ {normalizarUnidad(medicion.unidades)}</p>
-                                )}
+                              <div
+                                className="flex h-10 w-full items-center rounded-md border border-input bg-gray-50 px-3 text-sm text-gray-700"
+                                aria-label="Unidad fija: grados Celsius"
+                              >
+                                {TEMPERATURA_UNIDAD_FIJA}
                               </div>
                             </td>
                             <td className="px-4 py-3 flex items-center gap-2">
@@ -1813,7 +2025,7 @@ export function HandyRegClient() {
                     </table>
                   </div>
                 </div>
-              ) : (
+              ) : currentStep === 4 && tipoMedicion === 'vibracion' ? (
                 /* ── Vibración: acordeón por medición ── */
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -1824,7 +2036,7 @@ export function HandyRegClient() {
                     <div className="flex items-center gap-3">
                       <button
                         type="button"
-                        onClick={() => { if (!trabajoIniciado) setTipoMedicion(null); }}
+                        onClick={() => { if (!trabajoIniciado) { setTipoMedicion(null); setCurrentStep(3); } }}
                         disabled={trabajoIniciado}
                         className="text-xs text-gray-400 hover:text-gray-600 underline disabled:no-underline disabled:cursor-not-allowed"
                       >
@@ -1930,6 +2142,7 @@ export function HandyRegClient() {
                                           <Input
                                             type="text"
                                             inputMode="decimal"
+                                            pattern="[0-9]*[.,]?[0-9]*"
                                             placeholder={`Valor ${entIdx + 1}`}
                                             value={entrada.valor}
                                             onChange={(e) => handleOrientacionChange(med.id, key, entrada.id, e.target.value)}
@@ -1985,176 +2198,59 @@ export function HandyRegClient() {
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
 
-              {/* Campos de Control */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="ot">OT</Label>
-                  <Input
-                    id="ot"
-                    type="text"
-                    placeholder="Número de OT"
-                    value={ot}
-                    onChange={(e) => setOt(e.target.value)}
-                    disabled={saving || trabajoIniciado}
-                  />
-                </div>
-
-                {(trabajoIniciado || fechaFinEvento) && (
-                  <div className="space-y-2">
-                    <Label htmlFor="fecha_inicio">Fecha Inicio</Label>
-                    <Input
-                      id="fecha_inicio"
-                      type="datetime-local"
-                      value={fechaEvento}
-                      onChange={(e) => setFechaEvento(e.target.value)}
-                      disabled={saving}
-                    />
-                  </div>
-                )}
-
-                {fechaFinEvento && (
-                  <div className="space-y-2">
-                    <Label htmlFor="fecha_fin">Fecha Fin</Label>
-                    <Input
-                      id="fecha_fin"
-                      type="datetime-local"
-                      value={fechaFinEvento}
-                      onChange={(e) => setFechaFinEvento(e.target.value)}
-                      disabled={saving}
-                    />
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label htmlFor="estado">Estado</Label>
-                  <Select value={estado} onValueChange={setEstado} disabled={saving || trabajoIniciado}>
-                    <SelectTrigger id="estado">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="A">Activo</SelectItem>
-                      <SelectItem value="I">Inactivo</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Tareas Programadas */}
-              <div className="space-y-3 w-full">
-                <Label className="text-base font-semibold">Tareas Programadas</Label>
-                {loadingTareas ? (
-                  <Card className="p-6 flex items-center justify-center w-full">
-                    <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
-                    <span className="text-gray-600">Cargando tareas...</span>
-                  </Card>
-                ) : tareasSismac.length === 0 ? (
-                  <Card className="p-6 w-full">
-                    <p className="text-gray-500 text-center">No hay tareas programadas</p>
-                  </Card>
-                ) : (
-                  <div className="space-y-3 w-full">
-                    {/* Búsqueda */}
-                    <div className="relative w-full">
-                      <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              {/* Campos de Control: Fecha Inicio/Fin, atadas a Iniciar/Finalizar Trabajo (Paso 4) */}
+              {currentStep === 4 && (trabajoIniciado || fechaFinEvento) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(trabajoIniciado || fechaFinEvento) && (
+                    <div className="space-y-2">
+                      <Label htmlFor="fecha_inicio">Fecha Inicio</Label>
                       <Input
-                        placeholder="Buscar por tarea, máquina, componente, tipo o técnico..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10"
-                        disabled={saving || !trabajoIniciado}
+                        id="fecha_inicio"
+                        type="datetime-local"
+                        value={fechaEvento}
+                        onChange={(e) => setFechaEvento(e.target.value)}
+                        disabled={saving}
                       />
                     </div>
+                  )}
 
-                    {/* Radio Group de Tareas */}
-                    {tareasFiltradas.length === 0 ? (
-                      <Card className="p-6 w-full">
-                        <p className="text-gray-500 text-center">No hay tareas que coincidan con la búsqueda</p>
-                      </Card>
-                    ) : (
-                      <RadioGroup 
-                        value={selectedTarea || ""} 
-                        onValueChange={(val) => {
-                          setSelectedTarea(val);
-                          const [compKey] = val.split('__'); // Extrae la parte antes de __
-                          const tareaSeleccionada = tareasFiltradas.find(t => getTareaKey(t) === compKey);
-                          if (tareaSeleccionada) {
-                            setOt(getOtProgramada(tareaSeleccionada));
-                          }
-                        }}
-                      >
-                        <div className="space-y-2 max-h-96 overflow-y-auto w-full">
-                          {tareasFiltradas.map((tarea, idx) => {
-                            const tareaKey = getTareaKey(tarea);
-                            const uniqueKey = `${tareaKey}__${idx}`;
-                            return (
-                              <Card
-                                key={uniqueKey}
-                                className={`p-4 cursor-pointer transition-all w-full ${
-                                  !trabajoIniciado ? "pointer-events-none opacity-50" : ""
-                                } ${
-                                  selectedTarea?.startsWith(tareaKey)
-                                    ? "ring-2 ring-blue-500 bg-blue-50 border-blue-200"
-                                    : "bg-blue-50 border-blue-200 hover:shadow-md"
-                                }`}
-                                onClick={() => {
-                                  setSelectedTarea(uniqueKey);
-                                  setOt(getOtProgramada(tarea));
-                                }}
-                              >
-                                <div className="flex gap-3">
-                                  <RadioGroupItem value={uniqueKey} id={`tarea-${idx}`} className="mt-1" />
-                                  <div className="flex-1">
-                                    <label htmlFor={`tarea-${idx}`} className="cursor-pointer">
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                                        <div>
-                                          <p className="font-semibold text-blue-900">{tarea.TAREA}</p>
-                                          <p className="text-gray-600">Máquina: {tarea.MAQUINA}</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-gray-600">Componente: {tarea.COMPONENTE}</p>
-                                          <p className="text-gray-600">Frecuencia: {tarea.FRECUENCIA} días</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-gray-600">Tipo: {tarea.TIPO_MTO}</p>
-                                          <p className="text-gray-600">Programada: {new Date(tarea.FECHA_PRO).toLocaleDateString()}</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-gray-600">Técnico: {tarea.TECNICO || "No asignado"}</p>
-                                          <p className="text-gray-600">OT ULT: {tarea.OT_ULT ?? "No asignada"}</p>
-                                          <p className="text-gray-600">OT PRG: {getOtProgramada(tarea) || "No asignada"}</p>
-                                          <p className="text-gray-600">Tiempo est.: {tarea.TIEMPO} min</p>
-                                        </div>
-                                      </div>
-                                    </label>
-                                  </div>
-                                </div>
-                              </Card>
-                            );
-                          })}
-                        </div>
-                      </RadioGroup>
-                    )}
-                  </div>
-                )}
-              </div>
+                  {fechaFinEvento && (
+                    <div className="space-y-2">
+                      <Label htmlFor="fecha_fin">Fecha Fin</Label>
+                      <Input
+                        id="fecha_fin"
+                        type="datetime-local"
+                        value={fechaFinEvento}
+                        onChange={(e) => setFechaFinEvento(e.target.value)}
+                        disabled={saving}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Botones de navegación */}
               <div className="flex justify-between gap-3 pt-4">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     handlePrevStep();
-                  }} 
-                  disabled={saving || trabajoIniciado}
+                  }}
+                  disabled={saving || (currentStep === 4 && trabajoIniciado)}
                   type="button"
                 >
                   <ChevronLeft className="mr-2 h-4 w-4" />
                   Atrás
                 </Button>
+                {currentStep === 2 && (
+                  <Button onClick={handleNextStepOT} disabled={saving}>
+                    Siguiente <ChevronRight className="ml-2 h-4 w-4" />
+                  </Button>
+                )}
                 {false && (
                   <Button onClick={handleSubmit} disabled={saving}>
                     {saving ? (
@@ -2174,7 +2270,8 @@ export function HandyRegClient() {
             </CardContent>
           </Card>
 
-          {/* Botón Flotante para Iniciar/Finalizar Trabajo */}
+          {/* Botón Flotante para Iniciar/Finalizar Trabajo (solo en el Paso 4) */}
+          {currentStep === 4 && (
           <div className="fixed bottom-8 right-8">
             {trabajoIniciado ? (
               <Button
@@ -2197,6 +2294,7 @@ export function HandyRegClient() {
               </Button>
             )}
           </div>
+          )}
 
           {/* Modal de Confirmación de Guardado */}
           <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
@@ -2252,7 +2350,7 @@ export function HandyRegClient() {
                             {getEntradasActivas(med).filter((e) => e.valor.trim()).length} valor(es)
                           </span>
                         </div>
-                        <div className="grid grid-cols-3 gap-2 text-xs text-gray-600">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-gray-600">
                           <div><span className="font-medium text-blue-700">V:</span> {med.activeOrientaciones.vertical ? (med.vertical.filter((e) => e.valor.trim()).map((e) => `${e.valor}${e.unidades ? ` ${normalizarUnidad(e.unidades)}` : ""}`).join(", ") || "—") : "omitido"}</div>
                           <div><span className="font-medium text-green-700">H:</span> {med.activeOrientaciones.horizontal ? (med.horizontal.filter((e) => e.valor.trim()).map((e) => `${e.valor}${e.unidades ? ` ${normalizarUnidad(e.unidades)}` : ""}`).join(", ") || "—") : "omitido"}</div>
                           <div><span className="font-medium text-purple-700">A:</span> {med.activeOrientaciones.axial ? (med.axial.filter((e) => e.valor.trim()).map((e) => `${e.valor}${e.unidades ? ` ${normalizarUnidad(e.unidades)}` : ""}`).join(", ") || "—") : "omitido"}</div>
@@ -2262,7 +2360,7 @@ export function HandyRegClient() {
                   ) : (
                     registrosToConfirm.map((registro, idx) => (
                       <div key={idx} className="border rounded p-3 bg-blue-50">
-                        <div className="grid grid-cols-3 gap-2 text-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
                           <div>
                             <p className="text-gray-600">Medición #{registro.medicion}</p>
                           </div>

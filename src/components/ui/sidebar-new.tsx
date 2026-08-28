@@ -3,7 +3,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, PanelLeft } from "lucide-react";
+import { ChevronLeft, PanelLeft, Menu } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -16,39 +16,59 @@ export const SidebarFooter = React.forwardRef<
 ));
 SidebarFooter.displayName = "SidebarFooter";
 
-const SidebarContext = React.createContext<{
+type SidebarContextValue = {
   isCollapsed: boolean;
   toggleCollapse: () => void;
-} | null>(null);
+  isMobile: boolean;
+  openMobile: boolean;
+  setOpenMobile: (open: boolean) => void;
+};
+
+const SidebarContext = React.createContext<SidebarContextValue | null>(null);
 
 export function useSidebar() {
   const context = React.useContext(SidebarContext);
   if (!context) {
-    throw new Error("useSidebar must be used within a Sidebar");
+    throw new Error("useSidebar must be used within a SidebarProvider");
   }
   return context;
+}
+
+export function SidebarProvider({ children }: { children: React.ReactNode }) {
+  const [isCollapsed, setIsCollapsed] = React.useState(false);
+  const [openMobile, setOpenMobile] = React.useState(false);
+  const isMobile = useIsMobile();
+
+  const toggleCollapse = React.useCallback(() => {
+    setIsCollapsed((v) => !v);
+  }, []);
+
+  React.useEffect(() => {
+    if (!isMobile && openMobile) setOpenMobile(false);
+  }, [isMobile, openMobile]);
+
+  const value = React.useMemo<SidebarContextValue>(
+    () => ({ isCollapsed, toggleCollapse, isMobile, openMobile, setOpenMobile }),
+    [isCollapsed, toggleCollapse, isMobile, openMobile]
+  );
+
+  return <SidebarContext.Provider value={value}>{children}</SidebarContext.Provider>;
 }
 
 export const Sidebar = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, children, ...props }, ref) => {
-  const [isCollapsed, setIsCollapsed] = React.useState(false);
-  const isMobile = useIsMobile();
-  const [openMobile, setOpenMobile] = React.useState(false);
+  const { isCollapsed, toggleCollapse, isMobile, openMobile, setOpenMobile } = useSidebar();
   const [mounted, setMounted] = React.useState(false);
 
   React.useEffect(() => {
     setMounted(true);
   }, []);
 
-  const toggleCollapse = () => {
-    setIsCollapsed(!isCollapsed);
-  };
-
   // Render different markup for mobile (Sheet) and desktop (sticky sidebar).
   return (
-    <SidebarContext.Provider value={{ isCollapsed, toggleCollapse }}>
+    <>
       {isMobile ? (
         <>
           <Sheet open={openMobile} onOpenChange={setOpenMobile}>
@@ -69,27 +89,6 @@ export const Sidebar = React.forwardRef<
               </div>
             </SheetContent>
           </Sheet>
-
-          {/* Portal-mounted collapse toggle so it's never clipped by parent containers */}
-          {mounted
-            ? createPortal(
-                <div className="fixed bottom-6 left-4 z-[9999]">
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    className="rounded-full h-9 w-9 bg-card text-card-foreground hover:bg-card/80 shadow-lg"
-                    onClick={() => {
-                      // On mobile, open the sheet instead of collapsing
-                      setOpenMobile(true);
-                    }}
-                  >
-                    <PanelLeft className="h-4 w-4" />
-                    <span className="sr-only">Abrir menú</span>
-                  </Button>
-                </div>,
-                document.body
-              )
-            : null}
         </>
       ) : (
         <>
@@ -134,7 +133,7 @@ export const Sidebar = React.forwardRef<
             : null}
         </>
       )}
-    </SidebarContext.Provider>
+    </>
   );
 });
 Sidebar.displayName = "Sidebar";
@@ -203,8 +202,8 @@ export const SidebarMenuButton = React.forwardRef<
     href: string;
     active?: boolean;
   }
->(({ className, children, active = false, href, ...props }, ref) => {
-  const { isCollapsed } = useSidebar();
+>(({ className, children, active = false, href, onClick, ...props }, ref) => {
+  const { isCollapsed, isMobile, setOpenMobile } = useSidebar();
   const childrenArray = React.Children.toArray(children);
   const icon = childrenArray[0];
   const label = childrenArray[1];
@@ -218,11 +217,16 @@ export const SidebarMenuButton = React.forwardRef<
     className
   );
 
+  const handleClick: React.MouseEventHandler<HTMLAnchorElement> = (e) => {
+    onClick?.(e);
+    if (isMobile) setOpenMobile(false);
+  };
+
   const isExternal = typeof href === "string" && /^(https?:)?\/\//.test(href);
 
   if (isExternal) {
     return (
-      <a ref={ref} className={classNames} href={href} {...props}>
+      <a ref={ref} className={classNames} href={href} onClick={handleClick} {...props}>
         {icon}
         {!isCollapsed && label}
       </a>
@@ -231,7 +235,7 @@ export const SidebarMenuButton = React.forwardRef<
 
   // Internal link: use Next.js Link for client-side navigation
   return (
-    <Link href={href || "#"} className={classNames} {...(props as any)}>
+    <Link href={href || "#"} className={classNames} onClick={handleClick} {...(props as any)}>
       {icon}
       {!isCollapsed && label}
     </Link>
@@ -260,3 +264,26 @@ export const SidebarTrigger = React.forwardRef<
   );
 });
 SidebarTrigger.displayName = "SidebarTrigger";
+
+export const SidebarMobileTrigger = React.forwardRef<
+  HTMLButtonElement,
+  React.ComponentProps<typeof Button>
+>(({ className, ...props }, ref) => {
+  const { setOpenMobile } = useSidebar();
+
+  return (
+    <Button
+      ref={ref}
+      variant="ghost"
+      size="icon"
+      aria-label="Abrir menú de navegación"
+      className={cn("md:hidden h-11 w-11", className)}
+      onClick={() => setOpenMobile(true)}
+      {...props}
+    >
+      <Menu className="h-5 w-5" />
+      <span className="sr-only">Abrir menú de navegación</span>
+    </Button>
+  );
+});
+SidebarMobileTrigger.displayName = "SidebarMobileTrigger";

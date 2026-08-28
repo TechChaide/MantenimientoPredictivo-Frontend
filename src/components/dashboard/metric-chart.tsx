@@ -19,6 +19,7 @@ import {
   ReferenceArea,
 } from "recharts";
 import { ChartDataPoint } from "@/lib/data";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { tipoEventoService } from "@/services/tipoEvento.service";
@@ -146,7 +147,7 @@ const LabelingMenu = ({
         height: menuStyle.maxHeight,
         opacity: menuStyle.opacity,
       }}
-      className="fixed z-[9999] w-[300px] bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-opacity duration-150 font-sans"
+      className="fixed z-[9999] w-[min(300px,calc(100vw-2rem))] bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-opacity duration-150 font-sans"
     >
       <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center h-12 flex-shrink-0">
         {activeTipo ? (
@@ -432,8 +433,9 @@ export function MetricChart({
   machine,
   metric,
   yAxisLabel,
-  chartHeight = metric === "current" ? "h-[600px]" : "h-[400px]",
+  chartHeight = metric === "current" ? "h-[320px] md:h-[600px]" : "h-[260px] md:h-[400px]",
 }: MetricChartProps) {
+  const isMobile = useIsMobile();
   const [labelingMenu, setLabelingMenu] = useState<{
     x: number;
     y: number;
@@ -1492,7 +1494,7 @@ export function MetricChart({
                         <p className="text-xs text-slate-500 mb-3">
                           Seleccione el tipo de evento:
                         </p>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {tiposEventos.map((t: TipoEvento) => (
                             <button
                               key={t.codigo_tipo_evento}
@@ -1531,7 +1533,7 @@ export function MetricChart({
                             Cargando categorías...
                           </div>
                         ) : (
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {(categoriasMapLocal[selectedTipoModal] || []).map(
                               (c: CategoriaEvento) => (
                                 <button
@@ -1576,7 +1578,7 @@ export function MetricChart({
                     </div>
                   )} */}
 
-                    <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                       <div>
                         <label className="text-xs text-slate-500">
                           Fecha inicio (máx -2h)
@@ -1620,7 +1622,7 @@ export function MetricChart({
 
 
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="w-full mb-4 py-5 px-2 bg-white rounded-xl border border-gray-100">
                         <ModernWheelPicker
                           label="Ventana de Análisis"
@@ -1672,7 +1674,7 @@ export function MetricChart({
                         <h4 className="font-semibold text-sm text-gray-700 mb-2">
                           Referencias
                         </h4>
-                        <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                           <div>
                             <p className="text-gray-400 font-medium">
                               Componente:
@@ -1922,7 +1924,7 @@ export function MetricChart({
                         <ResponsiveContainer width="100%" height="100%">
                           <ComposedChart
                             data={plottedRaw}
-                            margin={{ top: 5, right: 140, left: 0, bottom: 30 }}
+                            margin={{ top: 5, right: isMobile ? 20 : 140, left: 0, bottom: 30 }}
                             onClick={handleRawChartClick}
                           >
                             <CartesianGrid
@@ -2493,7 +2495,7 @@ export function MetricChart({
           <ResponsiveContainer>
             <ComposedChart
               data={sortedData}
-              margin={{ top: 5, right: 140, left: 20, bottom: 5 }}
+              margin={{ top: 5, right: isMobile ? 20 : 140, left: 20, bottom: 5 }}
               onClick={handleChartClick}
             >
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -2798,7 +2800,7 @@ export function MetricChart({
                     <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart
                         data={sortedData}
-                        margin={{ top: 5, right: 140, left: 20, bottom: 5 }}
+                        margin={{ top: 5, right: isMobile ? 20 : 140, left: 20, bottom: 5 }}
                         onClick={handleChartClick}
                       >
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />

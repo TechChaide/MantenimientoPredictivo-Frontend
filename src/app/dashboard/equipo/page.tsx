@@ -14,6 +14,7 @@ import { AlertTriangle, Loader2, Plus, Save, RefreshCw, Trash2, X, Flag, Ellipsi
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useRegionalScope, filterAreasByRegional } from "@/hooks/use-regional-scope";
 
 type FormState = {
   mode: "new" | "edit";
@@ -42,6 +43,7 @@ export default function EquipoPage() {
   const [showForm, setShowForm] = useState(false);
   const { toast }:
     { toast: (args: { title: string; description?: string; variant?: "default" | "destructive" | "success" | "warning" }) => void } = useToast();
+  const { regional, mostrarTodos } = useRegionalScope();
 
   const load = async () => {
     setLoading(true); setError(null);
@@ -71,16 +73,27 @@ export default function EquipoPage() {
     loadAreas();
   }, []);
 
+  const areasEnRegional = useMemo(
+    () => filterAreasByRegional(areas, regional, mostrarTodos),
+    [areas, regional, mostrarTodos]
+  );
+
+  const itemsEnRegional = useMemo(() => {
+    if (mostrarTodos) return items;
+    const codigosAreaRegional = new Set(areasEnRegional.map(a => String(a.codigo_area)));
+    return items.filter(it => codigosAreaRegional.has(String(it.codigo_area)));
+  }, [items, areasEnRegional, mostrarTodos]);
+
   const filtered = useMemo(() => {
-    if (!filter) return items;
+    if (!filter) return itemsEnRegional;
     const f = filter.toLowerCase();
-    return items.filter(it =>
+    return itemsEnRegional.filter(it =>
       String(it.codigo_equipo ?? '').toLowerCase().includes(f) ||
       String(it.codigo_area ?? '').toLowerCase().includes(f) ||
       String(it.nombre_equipo ?? '').toLowerCase().includes(f) ||
       String(it.estado ?? '').toLowerCase().includes(f)
     );
-  }, [items, filter]);
+  }, [itemsEnRegional, filter]);
 
   const paginatedItems = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
@@ -191,7 +204,7 @@ export default function EquipoPage() {
                       <SelectValue placeholder="Seleccione un área" />
                     </SelectTrigger>
                     <SelectContent>
-                      {areas.map(area => (
+                      {areasEnRegional.map(area => (
                         <SelectItem key={area.codigo_area} value={String(area.codigo_area)}>
                           {area.nombre_area}
                         </SelectItem>

@@ -1,5 +1,5 @@
 
-import { format, formatISO, parseISO, addDays, differenceInDays, isSameDay, endOfDay } from 'date-fns';
+import { format, formatISO, parseISO, addDays, isSameDay, endOfDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { DateRange } from 'react-day-picker';
 
@@ -126,103 +126,6 @@ async function getStandardDeviation(
     console.error("Error fetching standard deviation:", error);
   }
   return 0;
-}
-
-export function aggregateDataByMonth(rawData: RawDataRecord[]): ChartDataPoint[] {
-    if (!rawData || rawData.length === 0) {
-      return [];
-    }
-
-    const groupedByMonth = rawData.reduce((acc, record) => {
-      if (!record.date) return acc;
-      const month = format(parseISO(record.date), 'yyyy-MM');
-      if (!acc[month]) {
-        acc[month] = { records: [], componentId: record.componentId };
-      }
-      acc[month].records.push(record);
-      return acc;
-    }, {} as Record<string, { records: RawDataRecord[], componentId: string }>);
-
-    const aggregatedResult = Object.entries(groupedByMonth).map(([month, group]) => {
-      const metrics = {
-        current: { sum: 0, count: 0 },
-        refCurrent: { sum: 0, count: 0 },
-        unbalance: { sum: 0, count: 0 },
-        refUnbalance: { sum: 0, count: 0 },
-        load_factor: { sum: 0, count: 0 },
-        refLoadFactor: { sum: 0, count: 0 },
-        current_limit: { sum: 0, count: 0 },
-        unbalance_limit: { sum: 0, count: 0 },
-        load_factor_limit: { sum: 0, count: 0 },
-      };
-
-      for (const record of group.records) {
-        const current = Number(record["Corriente Promedio Suavizado"]);
-        if (!isNaN(current)) {
-          metrics.current.sum += current;
-          metrics.current.count++;
-        }
-        const refCurrent = Number(record["Referencia Corriente Promedio Suavizado"]);
-        if (!isNaN(refCurrent)) {
-            metrics.refCurrent.sum += refCurrent;
-            metrics.refCurrent.count++;
-        }
-        const unbalance = Number(record["Desbalance Suavizado"]);
-        if (!isNaN(unbalance)) {
-          metrics.unbalance.sum += unbalance;
-          metrics.unbalance.count++;
-        }
-        const refUnbalance = Number(record["Referencia Desbalance Suavizado"]);
-        if (!isNaN(refUnbalance)) {
-          metrics.refUnbalance.sum += refUnbalance;
-          metrics.refUnbalance.count++;
-        }
-        const loadFactor = Number(record["Factor De Carga Suavizado"]);
-        if (!isNaN(loadFactor)) {
-          metrics.load_factor.sum += loadFactor;
-          metrics.load_factor.count++;
-        }
-        const refLoadFactor = Number(record["Referencia Factor De Carga Suavizado"]);
-        if (!isNaN(refLoadFactor)) {
-          metrics.refLoadFactor.sum += refLoadFactor;
-          metrics.refLoadFactor.count++;
-        }
-        
-        const currentLimit = Number(record["Corriente Máxima"]);
-        if (!isNaN(currentLimit) && currentLimit > 0) { 
-            metrics.current_limit.sum += currentLimit;
-            metrics.current_limit.count++;
-        }
-        const unbalanceLimit = Number(record["Umbral Desbalance"]);
-        if (!isNaN(unbalanceLimit) && unbalanceLimit > 0) {
-            metrics.unbalance_limit.sum += unbalanceLimit;
-            metrics.unbalance_limit.count++;
-        }
-        const loadFactorLimit = Number(record["Umbral Factor Carga"]);
-        if (!isNaN(loadFactorLimit) && loadFactorLimit > 0) {
-            metrics.load_factor_limit.sum += loadFactorLimit;
-            metrics.load_factor_limit.count++;
-        }
-      }
-      
-      return {
-        date: month,
-        componentId: group.componentId,
-        isProjection: false,
-        "Corriente Promedio Suavizado": metrics.current.count > 0 ? metrics.current.sum / metrics.current.count : null,
-        "Referencia Corriente Promedio Suavizado": metrics.refCurrent.count > 0 ? metrics.refCurrent.sum / metrics.refCurrent.count : null,
-        "Corriente Máxima": metrics.current_limit.count > 0 ? metrics.current_limit.sum / metrics.current_limit.count : null,
-        "Desbalance Suavizado": metrics.unbalance.count > 0 ? metrics.unbalance.sum / metrics.unbalance.count : null,
-        "Referencia Desbalance Suavizado": metrics.refUnbalance.count > 0 ? metrics.refUnbalance.sum / metrics.refUnbalance.count : null,
-        "Umbral Desbalance": metrics.unbalance_limit.count > 0 ? metrics.unbalance_limit.sum / metrics.unbalance_limit.count : null,
-        "Factor De Carga Suavizado": metrics.load_factor.count > 0 ? metrics.load_factor.sum / metrics.load_factor.count : null,
-        "Referencia Factor De Carga Suavizado": metrics.refLoadFactor.count > 0 ? metrics.refLoadFactor.sum / metrics.refLoadFactor.count : null,
-        "Umbral Factor Carga": metrics.load_factor_limit.count > 0 ? metrics.load_factor_limit.sum / metrics.load_factor_limit.count : null,
-        "Desv_PromedioSuavizado": null
-      };
-    });
-
-    return aggregatedResult.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function aggregateDataByDateTime(rawData: RawDataRecord[]): ChartDataPoint[] {
@@ -442,42 +345,32 @@ export async function useRealMaintenanceData(
     const startDate = format(fromDate, 'yyyy-MM-dd HH:mm:ss');
     const endDate = format(toDate, 'yyyy-MM-dd HH:mm:ss');
 
-    const dateDiff = differenceInDays(toDate, fromDate);
-    
-    const aggregationLevel = dateDiff > 365 ? 'month' : 'hour';
-  
+    // Se decidió (con el analista de TI) no usar un endpoint de agregación
+    // mensual del lado del backend: en vez de eso, para rangos largos se
+    // sigue trayendo la data paginada de siempre, pero renderizando el
+    // gráfico progresivamente a medida que llegan las páginas (ver el
+    // callback `onProgressUpdate` más abajo).
+    const aggregationLevel: 'hour' | 'month' = 'hour';
+
     let allData: RawDataRecord[] = [];
-  
+
     try {
-      if (aggregationLevel === 'month') {
-        const response = await calculosService.getDataByMachineComponentAndDatesAggregated({
+      const { total } = await calculosService.getTotalByMaquinaAndComponente(machineId, component.originalName, startDate, endDate);
+      const limit = 1000;
+      const totalPages = Math.ceil(total / limit);
+
+      for (let page = 1; page <= totalPages; page++) {
+        const response = await calculosService.getDataByMachineComponentAndDates({
           maquina: machineId,
           componente: component.originalName,
           fecha_inicio: startDate,
           fecha_fin: endDate,
+          page,
+          limit,
         });
-        const parsedData = response.data?.map(recordToDataPoint(component, 'monthly')).filter(Boolean) as RawDataRecord[] || [];
+        const parsedData = response.data?.map(recordToDataPoint(component, 'daily')).filter(Boolean) as RawDataRecord[] || [];
         allData.push(...parsedData);
-        onProgressUpdate?.(allData, 100);
-  
-      } else {
-        const { total } = await calculosService.getTotalByMaquinaAndComponente(machineId, component.originalName, startDate, endDate);
-        const limit = 1000;
-        const totalPages = Math.ceil(total / limit);
-  
-        for (let page = 1; page <= totalPages; page++) {
-          const response = await calculosService.getDataByMachineComponentAndDates({
-            maquina: machineId,
-            componente: component.originalName,
-            fecha_inicio: startDate,
-            fecha_fin: endDate,
-            page,
-            limit,
-          });
-          const parsedData = response.data?.map(recordToDataPoint(component, 'daily')).filter(Boolean) as RawDataRecord[] || [];
-          allData.push(...parsedData);
-          onProgressUpdate?.(allData, (page / totalPages) * 100);
-        }
+        onProgressUpdate?.(allData, (page / totalPages) * 100);
       }
     } catch (error) {
         console.error("Error fetching data from API:", error);
@@ -491,7 +384,8 @@ export async function useRealMaintenanceData(
       FechaFin: endDate,
     });
 
-    const aggregatedData = aggregationLevel === 'month' ? aggregateDataByMonth(allData) : aggregateDataByDateTime(allData);
+    // Siempre 'hour': ver nota más arriba sobre el endpoint de agregación mensual.
+    const aggregatedData = aggregateDataByDateTime(allData);
 
     aggregatedData.forEach(point => {
         point['Desv_PromedioSuavizado'] = Number(sigma) || 0;
@@ -509,7 +403,7 @@ export async function useRealMaintenanceData(
         }
     });
   
-    if (aggregatedData.length > 0 && aggregationLevel !== 'month') {
+    if (aggregatedData.length > 0) {
         const lastDate = parseISO(aggregatedData[aggregatedData.length - 1].date);
         const lastRealPoint = aggregatedData[aggregatedData.length-1];
         
