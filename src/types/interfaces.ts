@@ -306,12 +306,6 @@ export interface Limites {
   sigma_limite: number;
   factor_carga_limite_sup: number;
   factor_carga_limite_inf: number;
-  zona_segura_inf?: number;
-  zona_segura_sup?: number;
-  zona_alerta_inf?: number;
-  zona_alerta_sup?: number;
-  zona_critica_inf?: number;
-  zona_critica_sup?: number;
   estado: string;
 }
 

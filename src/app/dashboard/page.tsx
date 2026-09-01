@@ -29,6 +29,34 @@ import type { Area, Equipo, Componente } from "@/types/interfaces";
 // de analítica (texto libre) contra `nombre_componente` del maestro de componentes.
 const normalizeCompName = (s: string) => (s || "").toString().trim().toLowerCase();
 
+// Un componente puede existir en el endpoint de analítica (tiene FILAS) pero con
+// CorrientePromedioSuavizado siempre en 0 — o sea, el sensor nunca reportó una
+// lectura real (confirmado en vivo para TRANSFER3GYE/MOTOR RESORTERA: 50/50
+// registros con corriente 0). Eso no cuenta como "tiene datos" para este
+// dashboard; se verifica pidiendo una muestra del último año y comprobando que
+// al menos un registro tenga corriente distinta de 0.
+async function tieneDatosRealesDeCorriente(maquina: string, componente: string): Promise<boolean> {
+  try {
+    const hoy = new Date();
+    const desde = subDays(hoy, 365);
+    const resp = await calculosCorrientesDatosMantenimientoService.getDataByMachineComponentAndDates({
+      maquina,
+      componente,
+      fecha_inicio: format(desde, 'yyyy-MM-dd'),
+      fecha_fin: format(hoy, 'yyyy-MM-dd'),
+      page: 1,
+      limit: 300,
+    });
+    const filas: any[] = Array.isArray(resp?.data) ? resp.data : [];
+    return filas.some(r => {
+      const v = Number(r.CorrientePromedioSuavizado);
+      return Number.isFinite(v) && v !== 0;
+    });
+  } catch {
+    return false;
+  }
+}
+
 type DashboardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
 const DASHBOARD_STEPS: { number: DashboardStep; title: string }[] = [
@@ -173,24 +201,31 @@ function DashboardContent() {
         // para elegir en este wizard — confirmado con mantenimiento) Y que además
         // tengan al menos un componente que NO admita registro manual (los
         // componentes de registro manual no se miden por sensor, así que no
-        // corresponden a este dashboard predictivo).
+        // corresponden a este dashboard predictivo) Y cuya corriente reportada
+        // no sea siempre 0 (filas "fantasma" sin lectura real del sensor, ej.
+        // TRANSFER3GYE/MOTOR RESORTERA: existen registros, pero con corriente 0).
         const equiposConDatos = await Promise.all(
           equiposFiltrados.map(async (e) => {
             try {
               const resp = await calculosCorrientesDatosMantenimientoService.getComponentsByMachine({ maquina: e.nombre_equipo });
-              const nombresConDatos: string[] = Array.isArray(resp?.data)
-                ? resp.data.filter((c: any) => c.COMPONENTE).map((c: any) => normalizeCompName(c.COMPONENTE.toString()))
+              const nombresOriginales: string[] = Array.isArray(resp?.data)
+                ? resp.data.filter((c: any) => c.COMPONENTE).map((c: any) => c.COMPONENTE.toString())
                 : [];
-              if (nombresConDatos.length === 0) return null;
+              if (nombresOriginales.length === 0) return null;
 
               const componentesDelEquipo = allComponentes.filter(c => c.codigo_equipo === e.codigo_equipo);
-              const tieneComponenteSensor = nombresConDatos.some(nombreDatos => {
-                const match = componentesDelEquipo.find(c => normalizeCompName(c.nombre_componente) === nombreDatos);
+              const nombresSensor = nombresOriginales.filter(nombreOriginal => {
+                const match = componentesDelEquipo.find(c => normalizeCompName(c.nombre_componente) === normalizeCompName(nombreOriginal));
                 // Si no hay un registro correspondiente en el maestro de componentes,
                 // se asume que sí es de sensor (no hay forma de confirmar que es manual).
                 return !match || match.admite_registros_manuales !== true;
               });
-              return tieneComponenteSensor ? e : null;
+              if (nombresSensor.length === 0) return null;
+
+              const conDatosReales = await Promise.all(
+                nombresSensor.map(nombre => tieneDatosRealesDeCorriente(e.nombre_equipo, nombre))
+              );
+              return conDatosReales.some(Boolean) ? e : null;
             } catch {
               return null;
             }
@@ -330,7 +365,14 @@ function DashboardContent() {
             return !match || match.admite_registros_manuales !== true;
           });
 
-          const uniqueComponents = Array.from(new Map(soloSensores.map(c => [c.id, c])).values());
+          // Excluir además los componentes que existen en el endpoint pero cuya
+          // corriente reportada es siempre 0 (sensor sin lectura real).
+          const conDatosReales = await Promise.all(
+            soloSensores.map(c => tieneDatosRealesDeCorriente(machineId, c.originalName))
+          );
+          const componentesConDatos = soloSensores.filter((_, i) => conDatosReales[i]);
+
+          const uniqueComponents = Array.from(new Map(componentesConDatos.map(c => [c.id, c])).values());
           setComponentList(uniqueComponents);
         } else {
           console.error("Formato de respuesta inesperado para componentes:", response);

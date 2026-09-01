@@ -29,6 +29,8 @@ export function DashboardClient({ machineComponents, data, aggregationLevel, mac
   const [activeTab, setActiveTab] = React.useState<string>('general');
   const [prophetMap, setProphetMap] = React.useState<Record<string, ChartDataPoint[]>>({});
   const [montecarloMap, setMontecarloMap] = React.useState<Record<string, ChartDataPoint[]>>({});
+  const [prophetTrainedAtMap, setProphetTrainedAtMap] = React.useState<Record<string, string | null>>({});
+  const [montecarloTrainedAtMap, setMontecarloTrainedAtMap] = React.useState<Record<string, string | null>>({});
   const [loadingMap, setLoadingMap] = React.useState<Record<string, { prophet?: boolean; montecarlo?: boolean }>>({});
   const { toast } = useToast();
 
@@ -70,6 +72,7 @@ export function DashboardClient({ machineComponents, data, aggregationLevel, mac
             proyeccion_corriente_optimista: Number(p.limite_superior_95 ?? p.limite_superior),
           }));
           setProphetMap(prev => ({ ...prev, [component.id]: prophetResults }));
+          setProphetTrainedAtMap(prev => ({ ...prev, [component.id]: (prophetResp as any)?.entrenado_en ?? null }));
         } catch (err) {
           console.error('Error fetching prophet for', component, err);
           toast({ title: 'Error', description: 'No se pudieron obtener predicciones Prophet.' });
@@ -87,6 +90,7 @@ export function DashboardClient({ machineComponents, data, aggregationLevel, mac
             proyeccion_corriente_optimista: Number(p.limite_superior_95 ?? p.limite_superior),
           }));
           setMontecarloMap(prev => ({ ...prev, [component.id]: monteResults }));
+          setMontecarloTrainedAtMap(prev => ({ ...prev, [component.id]: (monteResp as any)?.entrenado_en ?? null }));
         } catch (err) {
           console.error('Error fetching montecarlo for', component, err);
           toast({ title: 'Error', description: 'No se pudieron obtener predicciones Montecarlo.' });
@@ -97,6 +101,46 @@ export function DashboardClient({ machineComponents, data, aggregationLevel, mac
     fetchForAll();
     return () => { mounted = false; };
   }, [activeTab, machineComponents, machine, predictionDays]);
+
+  // Gráfica combinatoria: promedio punto a punto entre Prophet y Montecarlo.
+  // Se empareja por timestamp exacto (misma fecha+hora que ya devuelve cada
+  // motor para el mismo horizonte de predicción) para conservar la misma
+  // densidad de puntos que las gráficas individuales — si se agrupara solo
+  // por día se perdería granularidad y el segmento de predicción quedaría
+  // comprimido en el eje X (categórico) respecto a Prophet/Montecarlo.
+  const combinedMap = React.useMemo(() => {
+    const promedio = (a?: number | null, b?: number | null) => {
+      const vals = [a, b].filter((v): v is number => v != null && !isNaN(v));
+      if (vals.length === 0) return null;
+      return vals.reduce((s, v) => s + v, 0) / vals.length;
+    };
+
+    const result: Record<string, ChartDataPoint[]> = {};
+    const componentIds = new Set([...Object.keys(prophetMap), ...Object.keys(montecarloMap)]);
+
+    componentIds.forEach((id) => {
+      const porTimestamp = new Map<string, { prophet?: any; monte?: any }>();
+      (prophetMap[id] || []).forEach((p: any) => {
+        porTimestamp.set(p.date, { ...(porTimestamp.get(p.date) || {}), prophet: p });
+      });
+      (montecarloMap[id] || []).forEach((p: any) => {
+        porTimestamp.set(p.date, { ...(porTimestamp.get(p.date) || {}), monte: p });
+      });
+
+      result[id] = Array.from(porTimestamp.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([fecha, { prophet, monte }]) => ({
+          date: fecha,
+          isProjection: true,
+          componentId: prophet?.componentId || monte?.componentId,
+          proyeccion_corriente_tendencia: promedio(prophet?.proyeccion_corriente_tendencia, monte?.proyeccion_corriente_tendencia),
+          proyeccion_corriente_pesimista: promedio(prophet?.proyeccion_corriente_pesimista, monte?.proyeccion_corriente_pesimista),
+          proyeccion_corriente_optimista: promedio(prophet?.proyeccion_corriente_optimista, monte?.proyeccion_corriente_optimista),
+        })) as unknown as ChartDataPoint[];
+    });
+
+    return result;
+  }, [prophetMap, montecarloMap]);
 
   return (
     <div className="space-y-8">
@@ -154,7 +198,14 @@ export function DashboardClient({ machineComponents, data, aggregationLevel, mac
                   <TabsContent value="predictive">
                     <div className="space-y-8">
                       <div>
-                        <h2 className="text-base font-semibold text-slate-800 mb-3">Prophet</h2>
+                        <div className="flex items-center gap-2 mb-3">
+                          <h2 className="text-base font-semibold text-slate-800">Prophet</h2>
+                          {prophetTrainedAtMap[component.id] && (
+                            <span className="text-xs text-slate-400">
+                              · Modelo entrenado el {new Date(prophetTrainedAtMap[component.id] as string).toLocaleString('es-ES')}
+                            </span>
+                          )}
+                        </div>
                         {!prophetMap[component.id] ? (
                           <div className="flex h-[400px] items-center justify-center rounded-md border border-dashed border-slate-200 bg-white">
                             <div className="text-center">
@@ -177,7 +228,14 @@ export function DashboardClient({ machineComponents, data, aggregationLevel, mac
                       </div>
 
                       <div>
-                        <h2 className="text-base font-semibold text-slate-800 mb-3">Montecarlo</h2>
+                        <div className="flex items-center gap-2 mb-3">
+                          <h2 className="text-base font-semibold text-slate-800">Montecarlo</h2>
+                          {montecarloTrainedAtMap[component.id] && (
+                            <span className="text-xs text-slate-400">
+                              · Modelo entrenado el {new Date(montecarloTrainedAtMap[component.id] as string).toLocaleString('es-ES')}
+                            </span>
+                          )}
+                        </div>
                         {!montecarloMap[component.id] ? (
                           <div className="flex h-[400px] items-center justify-center rounded-md border border-dashed border-slate-200 bg-white">
                             <div className="text-center">
@@ -195,6 +253,37 @@ export function DashboardClient({ machineComponents, data, aggregationLevel, mac
                             title={`montecarlo-${component.id}`}
                             yAxisLabel="Amperios"
                             accentColor="#dc2626"
+                          />
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2 mb-3">
+                          <h2 className="text-base font-semibold text-slate-800">Combinado (Promedio Prophet + Montecarlo)</h2>
+                          {(prophetTrainedAtMap[component.id] || montecarloTrainedAtMap[component.id]) && (
+                            <span className="text-xs text-slate-400">
+                              · Prophet: {prophetTrainedAtMap[component.id] ? new Date(prophetTrainedAtMap[component.id] as string).toLocaleString('es-ES') : '—'}
+                              {' · '}Montecarlo: {montecarloTrainedAtMap[component.id] ? new Date(montecarloTrainedAtMap[component.id] as string).toLocaleString('es-ES') : '—'}
+                            </span>
+                          )}
+                        </div>
+                        {(!prophetMap[component.id] || !montecarloMap[component.id]) ? (
+                          <div className="flex h-[400px] items-center justify-center rounded-md border border-dashed border-slate-200 bg-white">
+                            <div className="text-center">
+                              <img src={`${environment.basePath}/img/Chaide.svg`} alt="Chaide" className="mx-auto h-14 w-14 mb-3 animate-pulse" />
+                              <Loader className="mx-auto h-8 w-8 animate-spin text-primary" />
+                              <p className="mt-2 text-sm text-slate-600">Cargando Predicción Combinada...</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <PredictionChart
+                            key={`pred-combinado-${component.id}`}
+                            historicalData={data}
+                            predictionData={combinedMap[component.id] || []}
+                            historicalKey="Corriente Promedio Suavizado"
+                            title={`combinado-${component.id}`}
+                            yAxisLabel="Amperios"
+                            accentColor="#7c3aed"
                           />
                         )}
                       </div>

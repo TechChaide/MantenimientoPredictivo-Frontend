@@ -1,26 +1,33 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   ComposedChart, Scatter, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
+  Tooltip as RechartsTooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { AlertCircle, Activity, CheckCircle, ChevronLeft, Thermometer, Waves, HelpCircle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { areaService } from '@/services/area.service';
 import { equipoService } from '@/services/equipo.service';
 import { componenteService } from '@/services/componente.service';
 import { registrosService } from '@/services/registros.service';
 import { detallesService } from '@/services/detalles.service';
+import { menuService } from '@/services/menu.service';
 import { checkMostrarTodosEquipos } from '@/lib/mostrar-todos-equipos';
 import type { Area, Equipo, Componente, Registros, Detalles } from '@/types/interfaces';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const numeroALetra = (n: number) => String.fromCharCode(64 + n);
+
+// Cuántos días hacia adelante se extiende la línea de tendencia (regresión
+// lineal) más allá del último dato real registrado.
+const DIAS_PROYECCION_TENDENCIA = 15;
+const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
 interface TrendLineData { x: number; y: number; }
 interface RegressionResult { m: number; b: number; trendData: TrendLineData[]; r2: number; }
@@ -52,7 +59,23 @@ const interpretarR2 = (r2: number) => {
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
-type ChartPoint = { x: number; y: number; fechaHora: string };
+type ChartPoint = {
+  x: number;
+  y: number;
+  fechaHora: string;
+  codigo_registro: number;
+  codigo_detalle: number | string;
+  OT: string;
+  medicion: number;
+  tiempo_utilizado: number;
+  usuario_creacion: string;
+  fecha_inicio_evento?: string;
+  fecha_fin_evento?: string;
+  orientacion: string;
+  unidades: string;
+  estado_detalle: string;
+  usuario_modificacion: string;
+};
 
 type ChartSeries = {
   orientacion: string;   // "Vertical" | "Horizontal" | "Axial" | "" (temperatura)
@@ -110,7 +133,23 @@ function buildGroups(registros: Registros[], detalles: Detalles[]): MedicionGrou
     if (!oriMap.has(d.orientacion)) oriMap.set(d.orientacion, new Map());
     const unidMap = oriMap.get(d.orientacion)!;
     if (!unidMap.has(d.unidades)) unidMap.set(d.unidades, []);
-    unidMap.get(d.unidades)!.push({ x: ms, y: d.valor, fechaHora });
+    unidMap.get(d.unidades)!.push({
+      x: ms,
+      y: d.valor,
+      fechaHora,
+      codigo_registro: Number(reg.codigo_registro),
+      codigo_detalle: d.codigo_detalle,
+      OT: reg.OT,
+      medicion: med,
+      tiempo_utilizado: reg.tiempo_utilizado,
+      usuario_creacion: reg.usuario_creacion,
+      fecha_inicio_evento: reg.fecha_inicio_evento ? new Date(reg.fecha_inicio_evento).toLocaleString('es-ES') : undefined,
+      fecha_fin_evento: reg.fecha_fin_evento ? new Date(reg.fecha_fin_evento).toLocaleString('es-ES') : undefined,
+      orientacion: d.orientacion,
+      unidades: d.unidades,
+      estado_detalle: d.estado,
+      usuario_modificacion: d.usuario_modificacion,
+    });
   });
 
   const result: MedicionGroup[] = [];
@@ -146,6 +185,32 @@ export default function Dashboard2() {
   const [medicionGroups, setMedicionGroups] = useState<MedicionGroup[]>([]);
   const [selectedLetra, setSelectedLetra] = useState<string | null>(null);
   const [chartFilter, setChartFilter] = useState<ChartFilter>('');
+  const [selectedInspection, setSelectedInspection] = useState<ChartPoint | null>(null);
+  // Cache código de colaborador -> id_usuario (username), resuelto vía
+  // menuService.getUserProfiles (el único endpoint ya disponible que hace
+  // esa resolución; el backend no expone el nombre completo por código).
+  const [userNames, setUserNames] = useState<Record<string, string>>({});
+  const pendingUserCodesRef = useRef<Set<string>>(new Set());
+
+  const isNumericCode = (v?: string) => !!v && /^\d+$/.test(v.trim());
+  const resolveUserLabel = (code?: string) => (code && userNames[code]) || code || '—';
+
+  // Resolver los códigos de colaborador de la inspección seleccionada al abrir el modal
+  useEffect(() => {
+    if (!selectedInspection) return;
+    [selectedInspection.usuario_creacion, selectedInspection.usuario_modificacion].forEach(code => {
+      if (!isNumericCode(code) || !code) return;
+      if (userNames[code] || pendingUserCodesRef.current.has(code)) return;
+      pendingUserCodesRef.current.add(code);
+      menuService.getUserProfiles(code)
+        .then((resp: any) => {
+          const idUsuario = resp?.data?.id_usuario;
+          setUserNames(prev => ({ ...prev, [code]: idUsuario || code }));
+        })
+        .catch(() => setUserNames(prev => ({ ...prev, [code]: code })))
+        .finally(() => pendingUserCodesRef.current.delete(code));
+    });
+  }, [selectedInspection]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -237,11 +302,27 @@ export default function Dashboard2() {
   const renderChartContent = (series: ChartSeries, accent: string, keyPrefix: string) => {
     if (!series.data.length) return null;
     const reg = calcRegression(series.data);
-    const trend = reg.trendData.map(p => ({ x: p.x, y: parseFloat(p.y.toFixed(3)) }));
+    // Se extiende la línea de tendencia (misma regresión lineal) DIAS_PROYECCION_TENDENCIA
+    // días más allá del último dato real, para pronosticar hacia adelante.
+    const ultimoPuntoReal = reg.trendData[reg.trendData.length - 1] ?? null;
+    const xProyectado = ultimoPuntoReal ? ultimoPuntoReal.x + DIAS_PROYECCION_TENDENCIA * MS_POR_DIA : null;
+    const trend = (
+      xProyectado !== null
+        ? [...reg.trendData, { x: xProyectado, y: reg.m * xProyectado + reg.b }]
+        : reg.trendData
+    ).map(p => ({ x: p.x, y: parseFloat(p.y.toFixed(2)) }));
     const vals = series.data.map(d => d.y);
     const min = Math.min(...vals), max = Math.max(...vals);
     const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
     const r2i = interpretarR2(reg.r2);
+
+    // Dominio del eje Y con margen: por defecto Recharts ajusta el eje muy pegado a los
+    // datos, lo que aplasta la gráfica visualmente. Se incluye el valor proyectado para
+    // que la línea de tendencia futura no quede cortada.
+    const valoresY = trend.length > 0 ? [...vals, ...trend.map(p => p.y)] : vals;
+    const yMin = Math.min(...valoresY), yMax = Math.max(...valoresY);
+    const yMargen = (yMax - yMin) * 0.2 || Math.max(Math.abs(yMax), 1) * 0.2;
+    const yDomain: [number, number] = [yMin - yMargen, yMax + yMargen];
 
     return (
       <div key={keyPrefix} className="space-y-3">
@@ -261,7 +342,7 @@ export default function Dashboard2() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border cursor-help ${r2i.bg} ${r2i.color}`}>
-                  {r2i.icono} R² = {(reg.r2 * 100).toFixed(1)}% · {r2i.titulo}
+                  {r2i.icono} R² = {(reg.r2 * 100).toFixed(2)}% · {r2i.titulo}
                   <HelpCircle className="w-3 h-3 opacity-60" />
                 </span>
               </TooltipTrigger>
@@ -273,6 +354,10 @@ export default function Dashboard2() {
             </Tooltip>
           </TooltipProvider>
           <span className="text-xs text-gray-400">{series.data.length} punto{series.data.length !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-gray-400">· Click en un punto para ver el detalle de la inspección</span>
+          {ultimoPuntoReal && (
+            <span className="text-xs text-gray-400">· Tendencia proyectada {DIAS_PROYECCION_TENDENCIA} días hacia adelante</span>
+          )}
         </div>
         {/* Scatter + trend */}
         <ResponsiveContainer width="100%" height={260}>
@@ -283,22 +368,42 @@ export default function Dashboard2() {
               tickFormatter={ts => new Date(ts).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' })}
               angle={-40} textAnchor="end" height={75}
             />
-            <YAxis label={{ value: series.unidades, angle: -90, position: 'insideLeft', style: { fontSize: 11 } }} />
+            <YAxis
+              domain={yDomain}
+              tickFormatter={v => Number(v).toFixed(2)}
+              label={{ value: series.unidades, angle: -90, position: 'insideLeft', style: { fontSize: 11 } }}
+            />
             <RechartsTooltip
               cursor={{ strokeDasharray: '3 3' }}
               content={({ active, payload }) =>
                 active && payload?.length ? (
                   <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg text-sm">
                     <p className="text-xs text-gray-400 mb-1">{payload[0].payload.fechaHora}</p>
-                    <p className="font-bold" style={{ color: accent }}>{payload[0].payload.y?.toFixed(3)} {series.unidades}</p>
+                    <p className="font-bold" style={{ color: accent }}>{payload[0].payload.y?.toFixed(2)} {series.unidades}</p>
                   </div>
                 ) : null
               }
             />
             <Legend verticalAlign="top" />
-            <Scatter dataKey="y" data={series.data} fill={accent} fillOpacity={0.8} name={series.unidades} />
+            {ultimoPuntoReal && (
+              <ReferenceLine
+                x={ultimoPuntoReal.x}
+                stroke="#94a3b8"
+                strokeDasharray="4 4"
+                label={{ value: 'Hoy', position: 'top', fill: '#64748b', fontSize: 11 }}
+              />
+            )}
+            <Scatter
+              dataKey="y"
+              data={series.data}
+              fill={accent}
+              fillOpacity={0.8}
+              name={series.unidades}
+              cursor="pointer"
+              onClick={(point: any) => setSelectedInspection(point?.payload ?? point)}
+            />
             {trend.length >= 2 && (
-              <Line dataKey="y" data={trend} stroke="#ef4444" strokeWidth={2.5} strokeDasharray="6 3" name="Tendencia" isAnimationActive={false} dot={false} />
+              <Line dataKey="y" data={trend} stroke="#ef4444" strokeWidth={2.5} strokeDasharray="6 3" name={`Tendencia (+${DIAS_PROYECCION_TENDENCIA}d)`} isAnimationActive={false} dot={false} />
             )}
           </ComposedChart>
         </ResponsiveContainer>
@@ -758,6 +863,64 @@ export default function Dashboard2() {
       )}
       </>
       )}
+
+      {/* Detalle de inspección al hacer clic en un punto de la gráfica */}
+      <Dialog open={!!selectedInspection} onOpenChange={(open) => { if (!open) setSelectedInspection(null); }}>
+        <DialogContent className="max-w-md">
+          {selectedInspection && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Detalle de la Inspección</DialogTitle>
+                <DialogDescription>
+                  Medición {numeroALetra(selectedInspection.medicion)} · {selectedInspection.orientacion || 'Temperatura'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm py-2">
+                <div>
+                  <p className="text-xs text-gray-400">Valor registrado</p>
+                  <p className="font-bold text-gray-800">{selectedInspection.y} {selectedInspection.unidades}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Fecha de medición</p>
+                  <p className="font-medium text-gray-800">{selectedInspection.fechaHora}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">OT</p>
+                  <p className="font-medium text-gray-800">{selectedInspection.OT || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Registro</p>
+                  <p className="font-medium text-gray-800">#{selectedInspection.codigo_registro}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Inicio del evento</p>
+                  <p className="font-medium text-gray-800">{selectedInspection.fecha_inicio_evento || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Fin del evento</p>
+                  <p className="font-medium text-gray-800">{selectedInspection.fecha_fin_evento || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Tiempo utilizado</p>
+                  <p className="font-medium text-gray-800">{selectedInspection.tiempo_utilizado} min</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Estado</p>
+                  <p className="font-medium text-gray-800">{selectedInspection.estado_detalle === 'A' ? 'Activo' : selectedInspection.estado_detalle}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Registrado por</p>
+                  <p className="font-medium text-gray-800">{resolveUserLabel(selectedInspection.usuario_creacion)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Últ. modificación por</p>
+                  <p className="font-medium text-gray-800">{resolveUserLabel(selectedInspection.usuario_modificacion)}</p>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

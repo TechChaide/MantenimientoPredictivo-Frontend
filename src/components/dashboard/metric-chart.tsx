@@ -566,7 +566,9 @@ export function MetricChart({
               ? limitsResp.data
               : [];
 
-            const limiteEncontrado = limites.find(
+            // `any`: zona_segura/alerta/critica no existen en el modelo real de `limites`
+            // (ver modelo/Logical Model - Maquinas Mantenimiento.jpg), quedan undefined siempre.
+            const limiteEncontrado: any = limites.find(
               (l: any) =>
                 String(l.codigo_componente) === String(codigoComponente),
             );
@@ -786,7 +788,7 @@ export function MetricChart({
           </div>
           {relevantPayload.map((p: any) => (
             <p key={p.name} style={{ color: p.color }} className="text-sm">
-              {`${p.name}: ${p.value?.toFixed(3)}`}
+              {`${p.name}: ${p.value?.toFixed(2)}`}
             </p>
           ))}
           {referencePayload && referencePayload.value !== null && (
@@ -794,7 +796,7 @@ export function MetricChart({
               style={{ color: referencePayload.color }}
               className="text-sm font-semibold"
             >
-              {`📍 Referencia: ${referencePayload.value?.toFixed(3)}`}
+              {`📍 Referencia: ${referencePayload.value?.toFixed(2)}`}
             </p>
           )}
           {supplementalEntries.map((entry) => (
@@ -803,7 +805,7 @@ export function MetricChart({
               style={{ color: entry.color }}
               className="text-sm"
             >
-              {`${entry.label}: ${entry.value.toFixed(3)} A`}
+              {`${entry.label}: ${entry.value.toFixed(2)} A`}
             </p>
           ))}
         </div>
@@ -1068,9 +1070,14 @@ export function MetricChart({
 
   // Obtener sigma del backend
   const sigma = React.useMemo(() => {
+    // Guarda de cordura: si Desv_PromedioSuavizado viene corrupto/en otra escala
+    // (visto en vivo: dispara el eje Y a cientos de miles de millones mientras
+    // los datos reales están en un rango normal de amperios), se descarta en
+    // vez de romper el gráfico.
+    const limiteSigma = Math.max(Math.abs(mean ?? 0), 1) * 20;
     for (let point of sortedData) {
       const val = Number(point["Desv_PromedioSuavizado"]);
-      if (!isNaN(val) && val > 0) {
+      if (!isNaN(val) && val > 0 && val <= limiteSigma) {
         // console.log('✅ Sigma encontrado desde API:', { sigma: val, metric, mean });
         return val;
       }
@@ -1092,7 +1099,7 @@ export function MetricChart({
       return {
         ...config,
         value,
-        labelWithValue: `${config.label} (${value.toFixed(3)} A)`,
+        labelWithValue: `${config.label} (${value.toFixed(2)} A)`,
       };
     });
   }, [metric, mean, sigma]);
@@ -1412,7 +1419,7 @@ export function MetricChart({
                 </Button>
               </div>
               <p className="text-lg font-bold text-slate-900">
-                {selectedPointDetails.value.toFixed(3)} A
+                {selectedPointDetails.value.toFixed(2)} A
               </p>
               <p className="text-[11px] text-slate-500">
                 {selectedPointDetails.formattedDate}
@@ -1421,7 +1428,7 @@ export function MetricChart({
                 <p className="text-[11px] text-slate-600">
                   Med (0σ):{" "}
                   <span className="font-semibold text-slate-900">
-                    {meanSigmaLine.value.toFixed(3)} A
+                    {meanSigmaLine.value.toFixed(2)} A
                   </span>
                 </p>
               )}
@@ -1688,7 +1695,7 @@ export function MetricChart({
                               Valor Actual:
                             </p>
                             <p className="text-gray-500 font-mono">
-                              {selectedPoint?.payload?.[valueKey]?.toFixed(3) ||
+                              {selectedPoint?.payload?.[valueKey]?.toFixed(2) ||
                                 "N/A"}{" "}
                               A
                             </p>
@@ -1700,7 +1707,7 @@ export function MetricChart({
                             <p className="text-gray-500 font-mono">
                               {referenceKey &&
                               selectedPoint?.payload?.[referenceKey]
-                                ? selectedPoint.payload[referenceKey].toFixed(3)
+                                ? selectedPoint.payload[referenceKey].toFixed(2)
                                 : "N/A"}{" "}
                               A
                             </p>
@@ -1710,7 +1717,7 @@ export function MetricChart({
                               Media (x̄):
                             </p>
                             <p className="text-gray-500 font-mono">
-                              {mean !== null ? mean.toFixed(3) : "N/A"} A
+                              {mean !== null ? mean.toFixed(2) : "N/A"} A
                             </p>
                           </div>
                           <div>
@@ -1719,7 +1726,7 @@ export function MetricChart({
                             </p>
                             <p className="text-gray-500 font-mono">
                               {sigmaLimit !== null
-                                ? sigmaLimit.toFixed(3)
+                                ? sigmaLimit.toFixed(2)
                                 : "No configurado"}{" "}
                               A
                             </p>
@@ -1945,12 +1952,12 @@ export function MetricChart({
                                 }
                               }}
                             />
-                            <YAxis />
+                            <YAxis tickFormatter={(v) => Number(v).toFixed(2)} />
                             <RechartsTooltip
                               formatter={(value: any) =>
                                 value === null || value === undefined
                                   ? ["-", ""]
-                                  : [`${Number(value).toFixed(3)} A`, ""]
+                                  : [`${Number(value).toFixed(2)} A`, ""]
                               }
                               labelFormatter={(label) => {
                                 try {
@@ -2467,16 +2474,16 @@ export function MetricChart({
                                       {formattedFecha}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono text-xs">
-                                      {isNaN(l1) ? "-" : l1.toFixed(3)}
+                                      {isNaN(l1) ? "-" : l1.toFixed(2)}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono text-xs">
-                                      {isNaN(l2) ? "-" : l2.toFixed(3)}
+                                      {isNaN(l2) ? "-" : l2.toFixed(2)}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono text-xs">
-                                      {isNaN(l3) ? "-" : l3.toFixed(3)}
+                                      {isNaN(l3) ? "-" : l3.toFixed(2)}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono font-semibold">
-                                      {isNaN(avg) ? "-" : avg.toFixed(3)}
+                                      {isNaN(avg) ? "-" : avg.toFixed(2)}
                                     </td>
                                   </tr>
                                 );
@@ -2516,6 +2523,7 @@ export function MetricChart({
                   fill: "#64748b",
                 }}
                 tick={{ fill: "#64748b" }}
+                tickFormatter={(v) => Number(v).toFixed(2)}
                 stroke="#e2e8f0"
                 domain={["dataMin - 1", "auto"]}
                 allowDataOverflow={true}
@@ -2821,6 +2829,7 @@ export function MetricChart({
                             fill: "#64748b",
                           }}
                           tick={{ fill: "#64748b" }}
+                          tickFormatter={(v) => Number(v).toFixed(2)}
                           stroke="#e2e8f0"
                           domain={["dataMin - 1", "auto"]}
                           allowDataOverflow={true}

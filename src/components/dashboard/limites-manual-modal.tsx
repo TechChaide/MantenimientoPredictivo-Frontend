@@ -60,12 +60,6 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
     setForm({
       codigo_limite: "0",
       codigo_componente: componenteId,
-      zona_segura_inf: "0",
-      zona_segura_sup: "0",
-      zona_alerta_inf: "0",
-      zona_alerta_sup: "0",
-      zona_critica_inf: "0",
-      zona_critica_sup: "0",
       sigma_limite: "0",
       corriente_limite_sup: "0",
       corriente_limite_inf: "0",
@@ -81,12 +75,6 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
     setFormMode("edit");
     setForm({
       ...r,
-      zona_segura_inf: String((r as any).zona_segura_inf ?? "0"),
-      zona_segura_sup: String((r as any).zona_segura_sup ?? "0"),
-      zona_alerta_inf: String((r as any).zona_alerta_inf ?? "0"),
-      zona_alerta_sup: String((r as any).zona_alerta_sup ?? "0"),
-      zona_critica_inf: String((r as any).zona_critica_inf ?? "0"),
-      zona_critica_sup: String((r as any).zona_critica_sup ?? "0"),
       sigma_limite: String((r as any).sigma_limite ?? "0"),
       corriente_limite_sup: String((r as any).corriente_limite_sup ?? "0"),
       corriente_limite_inf: String((r as any).corriente_limite_inf ?? "0"),
@@ -100,15 +88,7 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
   const onChange = (field: keyof Limites, value: any) =>
     setForm((prev: any) => ({ ...prev, [field]: value }));
 
-  const canSave = () =>
-    Number.isFinite(Number(form.zona_segura_inf)) &&
-    Number.isFinite(Number(form.zona_segura_sup)) &&
-    Number.isFinite(Number(form.zona_alerta_inf)) &&
-    Number.isFinite(Number(form.zona_alerta_sup)) &&
-    Number.isFinite(Number(form.zona_critica_inf)) &&
-    Number.isFinite(Number(form.zona_critica_sup)) &&
-    Number.isFinite(Number(form.sigma_limite)) &&
-    !!form.estado;
+  const canSave = () => Number.isFinite(Number(form.sigma_limite)) && !!form.estado;
 
   const handleSave = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -119,12 +99,6 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
       const payload: Limites = {
         codigo_limite: formMode === "edit" ? String(form.codigo_limite ?? "") : "0",
         codigo_componente: String(form.codigo_componente ?? componenteId),
-        zona_segura_inf: Number(form.zona_segura_inf ?? 0),
-        zona_segura_sup: Number(form.zona_segura_sup ?? 0),
-        zona_alerta_inf: Number(form.zona_alerta_inf ?? 0),
-        zona_alerta_sup: Number(form.zona_alerta_sup ?? 0),
-        zona_critica_inf: Number(form.zona_critica_inf ?? 0),
-        zona_critica_sup: Number(form.zona_critica_sup ?? 0),
         sigma_limite: Number(form.sigma_limite ?? 0),
         corriente_limite_sup: Number(form.corriente_limite_sup ?? 0),
         corriente_limite_inf: Number(form.corriente_limite_inf ?? 0),
@@ -165,7 +139,7 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Límites (Zonas) - {componenteNombre}</DialogTitle>
+          <DialogTitle>Límites - {componenteNombre}</DialogTitle>
         </DialogHeader>
 
         {error && (
@@ -184,23 +158,25 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
                 <thead className="bg-gray-100">
                   <tr>
                     <th className="text-left px-3 py-2">Código</th>
-                    <th className="text-left px-3 py-2">Zona Segura</th>
-                    <th className="text-left px-3 py-2">Zona Alerta</th>
-                    <th className="text-left px-3 py-2">Zona Crítica</th>
+                    <th className="text-left px-3 py-2">Corriente</th>
+                    <th className="text-left px-3 py-2">Desbalance</th>
+                    <th className="text-left px-3 py-2">Factor de Carga</th>
+                    <th className="text-left px-3 py-2">Sigma</th>
+                    <th className="text-left px-3 py-2">Estado</th>
                     <th className="text-center px-3 py-2">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading && (
                     <tr>
-                      <td colSpan={5} className="px-3 py-3 text-center text-gray-500">
+                      <td colSpan={7} className="px-3 py-3 text-center text-gray-500">
                         Cargando...
                       </td>
                     </tr>
                   )}
                   {!loading && items.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-3 py-3 text-center text-gray-400">
+                      <td colSpan={7} className="px-3 py-3 text-center text-gray-400">
                         Sin límites
                       </td>
                     </tr>
@@ -208,15 +184,11 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
                   {items.map((item) => (
                     <tr key={item.codigo_limite} className="border-t hover:bg-gray-50">
                       <td className="px-3 py-2 font-mono">{item.codigo_limite}</td>
-                      <td className="px-3 py-2">
-                        {item.zona_segura_inf} - {item.zona_segura_sup}
-                      </td>
-                      <td className="px-3 py-2">
-                        {item.zona_alerta_inf} - {item.zona_alerta_sup}
-                      </td>
-                      <td className="px-3 py-2">
-                        {item.zona_critica_inf} - {item.zona_critica_sup}
-                      </td>
+                      <td className="px-3 py-2">{item.corriente_limite_inf} - {item.corriente_limite_sup}</td>
+                      <td className="px-3 py-2">{item.desbalance_limite_inf} - {item.desbalance_limite_sup}</td>
+                      <td className="px-3 py-2">{item.factor_carga_limite_inf} - {item.factor_carga_limite_sup}</td>
+                      <td className="px-3 py-2">{item.sigma_limite}</td>
+                      <td className="px-3 py-2">{item.estado === 'A' ? 'Activo' : 'Inactivo'}</td>
                       <td className="px-3 py-2 text-center space-x-1">
                         <button
                           onClick={() => startEdit(item)}
@@ -242,86 +214,89 @@ export default function LimitesManualModal({ isOpen, onClose, componenteId, comp
           {/* Formulario */}
           <div className="bg-gray-50 p-4 rounded-lg space-y-4">
             <h3 className="text-sm font-semibold">{formMode === "new" ? "Nuevo Límite" : "Editar Límite"}</h3>
+            <p className="text-xs text-gray-500 -mt-2">
+              En las gráficas de Registros Manuales, Corriente se grafica como banda de Vertical, Desbalance como Horizontal y Factor de Carga como Axial. Sigma se grafica como línea de referencia en todas las gráficas, incluida Temperatura.
+            </p>
 
-            {/* Zona Segura */}
+            {/* Corriente */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="zona_segura_inf">Límite Inf. Zona Segura</Label>
+                <Label htmlFor="corriente_limite_inf">Límite Inf. Corriente</Label>
                 <Input
-                  id="zona_segura_inf"
+                  id="corriente_limite_inf"
                   type="text"
                   inputMode="decimal"
                   pattern="[0-9]*[.,]?[0-9]*"
-                  value={form.zona_segura_inf || ""}
-                  onChange={(e) => onChange("zona_segura_inf" as any, sanitizeDecimalInput(e.target.value))}
+                  value={form.corriente_limite_inf || ""}
+                  onChange={(e) => onChange("corriente_limite_inf" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
               <div>
-                <Label htmlFor="zona_segura_sup">Límite Sup. Zona Segura</Label>
+                <Label htmlFor="corriente_limite_sup">Límite Sup. Corriente</Label>
                 <Input
-                  id="zona_segura_sup"
+                  id="corriente_limite_sup"
                   type="text"
                   inputMode="decimal"
                   pattern="[0-9]*[.,]?[0-9]*"
-                  value={form.zona_segura_sup || ""}
-                  onChange={(e) => onChange("zona_segura_sup" as any, sanitizeDecimalInput(e.target.value))}
+                  value={form.corriente_limite_sup || ""}
+                  onChange={(e) => onChange("corriente_limite_sup" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
             </div>
 
-            {/* Zona Alerta */}
+            {/* Desbalance */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="zona_alerta_inf">Límite Inf. Zona de Alerta</Label>
+                <Label htmlFor="desbalance_limite_inf">Límite Inf. Desbalance</Label>
                 <Input
-                  id="zona_alerta_inf"
+                  id="desbalance_limite_inf"
                   type="text"
                   inputMode="decimal"
                   pattern="[0-9]*[.,]?[0-9]*"
-                  value={form.zona_alerta_inf || ""}
-                  onChange={(e) => onChange("zona_alerta_inf" as any, sanitizeDecimalInput(e.target.value))}
+                  value={form.desbalance_limite_inf || ""}
+                  onChange={(e) => onChange("desbalance_limite_inf" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
               <div>
-                <Label htmlFor="zona_alerta_sup">Límite Sup. Zona de Alerta</Label>
+                <Label htmlFor="desbalance_limite_sup">Límite Sup. Desbalance</Label>
                 <Input
-                  id="zona_alerta_sup"
+                  id="desbalance_limite_sup"
                   type="text"
                   inputMode="decimal"
                   pattern="[0-9]*[.,]?[0-9]*"
-                  value={form.zona_alerta_sup || ""}
-                  onChange={(e) => onChange("zona_alerta_sup" as any, sanitizeDecimalInput(e.target.value))}
+                  value={form.desbalance_limite_sup || ""}
+                  onChange={(e) => onChange("desbalance_limite_sup" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
             </div>
 
-            {/* Zona Crítica */}
+            {/* Factor de Carga */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="zona_critica_inf">Límite Inf. Zona Crítica</Label>
+                <Label htmlFor="factor_carga_limite_inf">Límite Inf. Factor de Carga</Label>
                 <Input
-                  id="zona_critica_inf"
+                  id="factor_carga_limite_inf"
                   type="text"
                   inputMode="decimal"
                   pattern="[0-9]*[.,]?[0-9]*"
-                  value={form.zona_critica_inf || ""}
-                  onChange={(e) => onChange("zona_critica_inf" as any, sanitizeDecimalInput(e.target.value))}
+                  value={form.factor_carga_limite_inf || ""}
+                  onChange={(e) => onChange("factor_carga_limite_inf" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>
               <div>
-                <Label htmlFor="zona_critica_sup">Límite Sup. Zona Crítica</Label>
+                <Label htmlFor="factor_carga_limite_sup">Límite Sup. Factor de Carga</Label>
                 <Input
-                  id="zona_critica_sup"
+                  id="factor_carga_limite_sup"
                   type="text"
                   inputMode="decimal"
                   pattern="[0-9]*[.,]?[0-9]*"
-                  value={form.zona_critica_sup || ""}
-                  onChange={(e) => onChange("zona_critica_sup" as any, sanitizeDecimalInput(e.target.value))}
+                  value={form.factor_carga_limite_sup || ""}
+                  onChange={(e) => onChange("factor_carga_limite_sup" as any, sanitizeDecimalInput(e.target.value))}
                   placeholder="0"
                 />
               </div>

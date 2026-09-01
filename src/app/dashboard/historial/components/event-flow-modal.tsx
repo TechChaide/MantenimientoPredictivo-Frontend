@@ -211,7 +211,7 @@ export default function EventFlowModal({ open, onClose, entry, mode, machineName
                 Object.entries(paramsObj).map(([k, v]) => (
                   <div key={k} className="bg-gray-50 border rounded p-2 text-sm">
                     <div className="text-xs text-slate-500">{k}</div>
-                    <div className="font-medium">{typeof v === 'number' ? v.toFixed ? v.toFixed(3) : String(v) : String(v)}</div>
+                    <div className="font-medium">{typeof v === 'number' ? v.toFixed ? v.toFixed(2) : String(v) : String(v)}</div>
                   </div>
                 ))
               )}
@@ -262,8 +262,8 @@ export default function EventFlowModal({ open, onClose, entry, mode, machineName
                       <ComposedChart data={plottedRaw} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="date" tickFormatter={(v) => { try { return format(parseISO(String(v)), 'dd MMM HH:mm', { locale: es }); } catch { return String(v); } }} />
-                        <YAxis />
-                        <RechartsTooltip formatter={(value: any) => (value === null || value === undefined) ? ['-', ''] : [`${Number(value).toFixed(3)} A`, ''] } labelFormatter={(label) => { try { return format(parseISO(String(label)), 'dd MMM yyyy HH:mm:ss', { locale: es }); } catch { return String(label); } }} />
+                        <YAxis tickFormatter={(v) => Number(v).toFixed(2)} />
+                        <RechartsTooltip formatter={(value: any) => (value === null || value === undefined) ? ['-', ''] : [`${Number(value).toFixed(2)} A`, ''] } labelFormatter={(label) => { try { return format(parseISO(String(label)), 'dd MMM yyyy HH:mm:ss', { locale: es }); } catch { return String(label); } }} />
                         <Legend />
                         <Line type="monotone" dataKey="L1" name="Corriente L1" stroke="#9CA3AF" strokeWidth={1.5} dot={false} connectNulls={false} />
                         <Line type="monotone" dataKey="L2" name="Corriente L2" stroke="#B7C0C7" strokeWidth={1.5} dot={false} connectNulls={false} />

@@ -56,7 +56,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         };
         return (
           <p key={entry.dataKey} style={{ color: entry.color || entry.stroke }} className="text-xs">
-            {nameMap[entry.dataKey] || entry.dataKey}: <strong>{entry.value?.toFixed(3)}</strong>
+            {nameMap[entry.dataKey] || entry.dataKey}: <strong>{entry.value?.toFixed(2)}</strong>
           </p>
         );
       })}
@@ -133,17 +133,24 @@ export function PredictionChart({
       .filter((v) => !isNaN(v) && v > 0);
     if (values.length === 0) return { mean: null, sigma: 0 };
 
+    const m = values.reduce((a, b) => a + b, 0) / values.length;
+    // El rango real de los datos históricos sirve para detectar un sigma del
+    // backend fuera de escala (ej. Desv_PromedioSuavizado corrupto/en otras
+    // unidades) — visto en vivo: dispara el eje Y a cientos de miles de
+    // millones mientras el histórico real está entre 2 y 4. Si el sigma es
+    // desproporcionado respecto al propio rango de los datos, se descarta y
+    // se recalcula manualmente en vez de romper la escala del gráfico.
+    const rangoHistorico = Math.max(...values) - Math.min(...values) || m || 1;
+
     // Try to get sigma from backend data first (Desv_PromedioSuavizado)
     for (const point of realData) {
       const val = Number(point["Desv_PromedioSuavizado"]);
-      if (!isNaN(val) && val > 0) {
-        const m = values.reduce((a, b) => a + b, 0) / values.length;
+      if (!isNaN(val) && val > 0 && val <= rangoHistorico * 20) {
         return { mean: m, sigma: val };
       }
     }
 
     // Fallback: calculate sigma manually
-    const m = values.reduce((a, b) => a + b, 0) / values.length;
     const variance = values.reduce((sum, v) => sum + (v - m) ** 2, 0) / (values.length - 1 || 1);
     return { mean: m, sigma: Math.sqrt(variance) };
   }, [historicalData, historicalKey]);
@@ -155,6 +162,26 @@ export function PredictionChart({
       value: mean + config.multiplier * sigma,
     }));
   }, [mean, sigma]);
+
+  // Sin domain explícito, Recharts usa [0, auto] — si los datos reales están lejos
+  // de 0 (ej. entre 1.9 y 3.8), se desperdicia todo ese espacio de abajo. Se arma
+  // el dominio a partir de los valores realmente graficados (histórico, predicción,
+  // bandas de confianza y líneas de sigma) con un margen, para aprovechar el alto
+  // disponible sin cortar ninguna línea.
+  const yDomain = useMemo((): [number, number] | undefined => {
+    const valores: number[] = [];
+    chartData.forEach((d) => {
+      [d.historico, d.prediccion, d.limite_inferior, d.limite_superior].forEach((v) => {
+        if (v != null && Number.isFinite(v)) valores.push(v);
+      });
+    });
+    sigmaLines.forEach((l) => valores.push(l.value));
+    if (valores.length === 0) return undefined;
+    const min = Math.min(...valores);
+    const max = Math.max(...valores);
+    const margen = (max - min) * 0.1 || Math.max(Math.abs(max), 1) * 0.1;
+    return [min - margen, max + margen];
+  }, [chartData, sigmaLines]);
 
   const formatXAxis = (value: string) => {
     try {
@@ -194,13 +221,15 @@ export function PredictionChart({
           />
 
           <YAxis
+            domain={yDomain ?? [0, "auto"]}
+            tickFormatter={(v) => Number(v).toFixed(2)}
             tick={{ fontSize: 10, fill: "#64748b" }}
             label={{ value: yAxisLabel, angle: -90, position: "insideLeft", style: { fontSize: 11, fill: "#94a3b8" } }}
           />
 
           <RechartsTooltip content={<CustomTooltip />} />
 
-          {/* Confidence band - upper bound area */}
+          {/* Confidence band - upper bound area (solo relleno visual, no es una serie propia) */}
           <Area
             type="monotone"
             dataKey="limite_superior"
@@ -209,9 +238,10 @@ export function PredictionChart({
             fillOpacity={1}
             connectNulls={false}
             isAnimationActive={false}
+            legendType="none"
           />
 
-          {/* Confidence band - lower bound (clips the area) */}
+          {/* Confidence band - lower bound (clips the area; tampoco es una serie propia) */}
           <Area
             type="monotone"
             dataKey="limite_inferior"
@@ -220,12 +250,14 @@ export function PredictionChart({
             fillOpacity={1}
             connectNulls={false}
             isAnimationActive={false}
+            legendType="none"
           />
 
-          {/* Lower bound line */}
+          {/* Lower bound line — esta es la única que representa "Límite Inferior" en la leyenda */}
           <Line
             type="monotone"
             dataKey="limite_inferior"
+            name="limite_inferior"
             stroke="#f59e0b"
             strokeWidth={1}
             strokeDasharray="4 4"
@@ -234,10 +266,11 @@ export function PredictionChart({
             isAnimationActive={false}
           />
 
-          {/* Upper bound line */}
+          {/* Upper bound line — esta es la única que representa "Límite Superior" en la leyenda */}
           <Line
             type="monotone"
             dataKey="limite_superior"
+            name="limite_superior"
             stroke="#f59e0b"
             strokeWidth={1}
             strokeDasharray="4 4"
@@ -290,7 +323,7 @@ export function PredictionChart({
               strokeDasharray={line.dash}
               strokeWidth={line.width}
               label={{
-                value: `${line.label} (${line.value.toFixed(1)})`,
+                value: `${line.label} (${line.value.toFixed(2)})`,
                 position: "right",
                 fill: line.color,
                 fontSize: 9,
@@ -302,11 +335,13 @@ export function PredictionChart({
             verticalAlign="bottom"
             height={36}
             formatter={(value: string) => {
+              // Mismos nombres que usa el Tooltip para esta gráfica, así no hay
+              // dos términos distintos ("Zona de Riesgo" vs "Límite") para lo mismo.
               const labels: Record<string, string> = {
                 historico: "Histórico",
                 prediccion: "Mejor Estimación (Promedio)",
-                limite_superior: "Zona de Riesgo (Sup.)",
-                limite_inferior: "Zona de Riesgo (Inf.)",
+                limite_superior: "Límite Superior (95%)",
+                limite_inferior: "Límite Inferior (95%)",
               };
               return labels[value] || value;
             }}
